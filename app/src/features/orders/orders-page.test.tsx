@@ -108,4 +108,16 @@ describe('OrdersPage', () => {
     expect(await screen.findByText('Test Dealer')).toBeInTheDocument()
     expect(screen.queryByText('Client Beta')).not.toBeInTheDocument()
   })
+
+  it('associates each filter label with its control for screen readers', async () => {
+    renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    await screen.findByRole('table')
+
+    // Labels point at the controls themselves (htmlFor -> control id), not at
+    // a wrapper div, so getByLabelText resolves to the input/select.
+    expect((screen.getByLabelText('Area') as HTMLElement).tagName).toBe('SELECT')
+    expect((screen.getByLabelText('Order type') as HTMLElement).tagName).toBe('SELECT')
+    expect((screen.getByLabelText('Client') as HTMLElement).tagName).toBe('INPUT')
+    expect((screen.getByLabelText('PHC ref') as HTMLElement).tagName).toBe('INPUT')
+  })
 })

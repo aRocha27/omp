@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Search, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -55,105 +55,131 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
   return (
     <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       <LabeledField label="Client">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-foreground/40" aria-hidden />
-          <Input
-            className="pl-8"
-            placeholder="Search client"
-            value={value.clientName}
-            onChange={(e) => set('clientName', e.target.value)}
-          />
-        </div>
+        {(id) => (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-foreground/40" aria-hidden />
+            <Input
+              id={id}
+              className="pl-8"
+              placeholder="Search client"
+              value={value.clientName}
+              onChange={(e) => set('clientName', e.target.value)}
+            />
+          </div>
+        )}
       </LabeledField>
 
       <LabeledField label="Order type">
-        <Select value={value.idTpOrder} onChange={(e) => set('idTpOrder', e.target.value)}>
-          <option value="">All</option>
-          {orderTypes.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+        {(id) => (
+          <Select id={id} value={value.idTpOrder} onChange={(e) => set('idTpOrder', e.target.value)}>
+            <option value="">All</option>
+            {orderTypes.map((o) => (
+              <option key={o.id} value={String(o.id)}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        )}
       </LabeledField>
 
       <LabeledField label="Area">
-        <Select value={value.idArea} onChange={(e) => set('idArea', e.target.value)}>
-          <option value="">All</option>
-          {areas.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+        {(id) => (
+          <Select id={id} value={value.idArea} onChange={(e) => set('idArea', e.target.value)}>
+            <option value="">All</option>
+            {areas.map((o) => (
+              <option key={o.id} value={String(o.id)}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        )}
       </LabeledField>
 
       <LabeledField label="Product">
-        <Select value={value.idProduto} onChange={(e) => set('idProduto', e.target.value)}>
-          <option value="">All</option>
-          {produtos.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+        {(id) => (
+          <Select id={id} value={value.idProduto} onChange={(e) => set('idProduto', e.target.value)}>
+            <option value="">All</option>
+            {produtos.map((o) => (
+              <option key={o.id} value={String(o.id)}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        )}
       </LabeledField>
 
       <LabeledField label="Instrument">
-        <Select value={value.idInstrumento} onChange={(e) => set('idInstrumento', e.target.value)}>
-          <option value="">All</option>
-          {instrumentos.map((o) => (
-            <option key={o.id} value={String(o.id)}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+        {(id) => (
+          <Select id={id} value={value.idInstrumento} onChange={(e) => set('idInstrumento', e.target.value)}>
+            <option value="">All</option>
+            {instrumentos.map((o) => (
+              <option key={o.id} value={String(o.id)}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        )}
       </LabeledField>
 
       <LabeledField label="PHC ref">
-        <Input
-          placeholder="Search PHC ref"
-          value={value.encomendaCliPHC}
-          onChange={(e) => set('encomendaCliPHC', e.target.value)}
-        />
+        {(id) => (
+          <Input
+            id={id}
+            placeholder="Search PHC ref"
+            value={value.encomendaCliPHC}
+            onChange={(e) => set('encomendaCliPHC', e.target.value)}
+          />
+        )}
       </LabeledField>
 
       <LabeledField label="Factory order">
-        <Select
-          value={value.orderFactory}
-          onChange={(e) => set('orderFactory', e.target.value as OrdersFiltersValue['orderFactory'])}
-        >
-          <option value="">All</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </Select>
+        {(id) => (
+          <Select
+            id={id}
+            value={value.orderFactory}
+            onChange={(e) => set('orderFactory', e.target.value as OrdersFiltersValue['orderFactory'])}
+          >
+            <option value="">All</option>
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </Select>
+        )}
       </LabeledField>
 
       <LabeledField label="Deal closed">
-        <Select
-          value={value.negocioFechado}
-          onChange={(e) => set('negocioFechado', e.target.value as OrdersFiltersValue['negocioFechado'])}
-        >
-          <option value="">All</option>
-          <option value="true">Closed</option>
-          <option value="false">Open</option>
-        </Select>
+        {(id) => (
+          <Select
+            id={id}
+            value={value.negocioFechado}
+            onChange={(e) => set('negocioFechado', e.target.value as OrdersFiltersValue['negocioFechado'])}
+          >
+            <option value="">All</option>
+            <option value="true">Closed</option>
+            <option value="false">Open</option>
+          </Select>
+        )}
       </LabeledField>
 
       <LabeledField label="From date">
-        <Input
-          type="date"
-          value={value.dateFrom}
-          onChange={(e) => set('dateFrom', e.target.value)}
-        />
+        {(id) => (
+          <Input
+            id={id}
+            type="date"
+            value={value.dateFrom}
+            onChange={(e) => set('dateFrom', e.target.value)}
+          />
+        )}
       </LabeledField>
 
       <LabeledField label="To date">
-        <Input
-          type="date"
-          value={value.dateTo}
-          onChange={(e) => set('dateTo', e.target.value)}
-        />
+        {(id) => (
+          <Input
+            id={id}
+            type="date"
+            value={value.dateTo}
+            onChange={(e) => set('dateTo', e.target.value)}
+          />
+        )}
       </LabeledField>
 
       <div className="flex items-end">
@@ -171,14 +197,19 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
   )
 }
 
-function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * Renders a field label associated (via `htmlFor`) with the control returned
+ * by `children`. The control receives the generated `id` so screen readers
+ * announce the label for the actual input/select, not a wrapper div.
+ */
+function LabeledField({ label, children }: { label: string; children: (id: string) => ReactNode }) {
   const id = useId()
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="text-[11px] font-medium uppercase tracking-wider text-foreground/50">
         {label}
       </label>
-      <div id={id}>{children}</div>
+      {children(id)}
     </div>
   )
 }
