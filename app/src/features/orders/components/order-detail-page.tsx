@@ -16,16 +16,18 @@ import {
   InvoicedBadge,
   RecognizedBadge,
 } from '@/features/orders/components/order-status-badge'
+import {
+  areaLabel,
+  instrumentoLabel,
+  orderTypeLabel,
+  produtoLabel,
+} from '@/features/orders/components/reference-labels'
 
 /** Em-dash fallback for any null/empty display value. */
 const DASH = '—'
 
 function displayText(v: string | null | undefined): string {
   return v && v.length > 0 ? v : DASH
-}
-
-function displayNumber(v: number | null | undefined): string {
-  return v == null ? DASH : String(v)
 }
 
 function displayBool(v: boolean | null): string {
@@ -135,7 +137,7 @@ function OrderDetail({ order }: { order: Order }) {
       content: (
         <FieldGrid>
           <Field label="Order Date">{formatOrderDate(order.DT_Order)}</Field>
-          <Field label="Order Type">{displayText(order.ID_Tp_Order)}</Field>
+          <Field label="Order Type">{displayText(orderTypeLabel(order.ID_Tp_Order))}</Field>
           <Field label="Factory Order">
             {order.Order_Factory == null ? (
               DASH
@@ -181,10 +183,11 @@ function OrderDetail({ order }: { order: Order }) {
         <FieldGrid>
           <Field label="PHC Order Ref">{displayText(order.Encomenda_Cli_PHC)}</Field>
           <Field label="Supplier Order Ref">{displayText(order.Cod_Enc_Fornecedor)}</Field>
-          <Field label="Area ID">{displayNumber(order.ID_Area)}</Field>
-          <Field label="Tipo ID">{displayNumber(order.ID_Tipo)}</Field>
-          <Field label="Produto ID">{displayNumber(order.ID_Produto)}</Field>
-          <Field label="Instrumento ID">{displayNumber(order.ID_Instrumento)}</Field>
+          <Field label="Area">{displayText(areaLabel(order.ID_Area))}</Field>
+          {/* No reference-data source for ID_Tipo yet — show "—" until one is wired in. */}
+          <Field label="Tipo">{DASH}</Field>
+          <Field label="Product">{displayText(produtoLabel(order.ID_Produto))}</Field>
+          <Field label="Instrument">{displayText(instrumentoLabel(order.ID_Instrumento))}</Field>
         </FieldGrid>
       ),
     },
@@ -196,9 +199,11 @@ function OrderDetail({ order }: { order: Order }) {
           <Field label="Sell Price">{formatPrice(order.Sell_Price)}</Field>
           <Field label="Quoted Price">{formatPrice(order.Orc_Proposta)}</Field>
           <Field label="Warranty Reserve">{formatPrice(order.Warranty_Reserve)}</Field>
-          <Field label="Warranty Type">{displayText(order.ID_Tp_Warranty)}</Field>
+          {/* No reference-data source for ID_Tp_Warranty yet — show "—" until one is wired in. */}
+          <Field label="Warranty Type">{DASH}</Field>
           <Field label="Warranty Start">{formatOrderDate(order.Warranty_DT_Inicio)}</Field>
-          <Field label="Revenue Type">{displayText(order.ID_Tp_Revenue)}</Field>
+          {/* No reference-data source for ID_Tp_Revenue yet — show "—" until one is wired in. */}
+          <Field label="Revenue Type">{DASH}</Field>
           <Field label="Kit">{displayBool(order.Kit)}</Field>
           <Field label="Kit Amount">{formatPrice(order.Kit_Amount)}</Field>
         </FieldGrid>
@@ -217,7 +222,8 @@ function OrderDetail({ order }: { order: Order }) {
           </div>
           <SectionHeading>Audit</SectionHeading>
           <FieldGrid>
-            <Field label="Last User">{displayText(order.ID_User)}</Field>
+            {/* No user-directory source for ID_User yet — show "—" until one is wired in. */}
+            <Field label="Last User">{DASH}</Field>
             <Field label="Last Updated">{formatOrderDate(order.DT_User)}</Field>
           </FieldGrid>
         </div>

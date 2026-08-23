@@ -9,7 +9,9 @@ import {
   type HeaderGroup,
   type Row,
 } from '@tanstack/react-table'
+import { Link } from 'react-router-dom'
 import { DealStatusBadge } from '@/features/orders/components/order-status-badge'
+import { orderTypeLabel } from '@/features/orders/components/reference-labels'
 import { formatOrderDate, formatPrice } from '@/utils/format'
 import type { OrderSummary } from '@/domain/models/order'
 
@@ -18,7 +20,14 @@ const columns: ColumnDef<OrderSummary>[] = [
     accessorKey: 'ID_Order',
     header: 'Order #',
     cell: ({ row }: CellContext<OrderSummary, unknown>) => (
-      <span className="font-medium">{row.original.ID_Order}</span>
+      <Link
+        to={`/orders/${row.original.ID_Order}`}
+        aria-label={`View order ${row.original.ID_Order} details`}
+        onClick={(e) => e.stopPropagation()}
+        className="font-medium hover:underline"
+      >
+        {row.original.ID_Order}
+      </Link>
     ),
   },
   {
@@ -44,7 +53,7 @@ const columns: ColumnDef<OrderSummary>[] = [
   {
     accessorKey: 'ID_Tp_Order',
     header: 'Type',
-    cell: ({ row }: CellContext<OrderSummary, unknown>) => row.original.ID_Tp_Order ?? '—',
+    cell: ({ row }: CellContext<OrderSummary, unknown>) => orderTypeLabel(row.original.ID_Tp_Order) ?? '—',
   },
   {
     id: 'price',
@@ -81,14 +90,6 @@ export function OrdersTable({ data, onRowClick }: OrdersTableProps) {
   })
   const clickable = Boolean(onRowClick)
 
-  const handleKeyDown = (row: Row<OrderSummary>, e: React.KeyboardEvent<HTMLTableRowElement>) => {
-    if (!onRowClick) return
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onRowClick(row.original.ID_Order)
-    }
-  }
-
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full border-collapse text-sm" aria-label="Orders">
@@ -112,12 +113,9 @@ export function OrdersTable({ data, onRowClick }: OrdersTableProps) {
             <tr
               key={row.id}
               onClick={onRowClick ? () => onRowClick(row.original.ID_Order) : undefined}
-              onKeyDown={onRowClick ? (e) => handleKeyDown(row, e) : undefined}
-              tabIndex={clickable ? 0 : undefined}
-              aria-label={clickable ? `View order ${row.original.ID_Order} details` : undefined}
               className={[
                 'border-t border-border transition-colors hover:bg-foreground/[0.03]',
-                clickable ? 'cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30' : '',
+                clickable ? 'cursor-pointer' : '',
               ].join(' ')}
             >
               {row.getVisibleCells().map((cell: Cell<OrderSummary, unknown>) => (

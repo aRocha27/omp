@@ -75,7 +75,11 @@ export function OrdersPage() {
               : 'Orders will appear here once they are created.'
           }
           action={
-            showCreate && !hasActiveFilters ? (
+            hasActiveFilters ? (
+              <Button size="sm" variant="secondary" onClick={() => setFilters(emptyFilters)}>
+                Clear filters
+              </Button>
+            ) : showCreate ? (
               <Button size="sm" onClick={() => navigate('/orders/new')}>
                 <Plus className="size-4" aria-hidden />
                 New order

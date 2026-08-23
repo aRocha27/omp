@@ -65,20 +65,18 @@ describe('OrdersPage', () => {
     expect(screen.queryByText('PHC-1002')).not.toBeInTheDocument()
   })
 
-  it('makes rows clickable and navigates on row click without error', async () => {
+  it('links each row to its order detail and keeps the row mouse-clickable', async () => {
     renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
     await screen.findByRole('table')
 
-    // The first data row (Client Alpha, order 1001) should be clickable.
-    const alphaCells = await screen.findAllByText('Client Alpha')
-    const row = alphaCells[0].closest('tr')
-    expect(row).not.toBeNull()
-    const rowEl = row as HTMLElement
-    expect(rowEl.tabIndex).toBe(0)
-    expect(rowEl.className).toContain('cursor-pointer')
+    // The Order # cell is a real link (keyboard-accessible) to the detail page.
+    const link = screen.getByRole('link', { name: /View order 1001 details/ })
+    expect(link).toHaveAttribute('href', '/orders/1001')
 
-    // Clicking must not throw; navigation is exercised end-to-end by E2E.
-    expect(() => fireEvent.click(rowEl)).not.toThrow()
+    // The whole row stays mouse-clickable (cursor affordance, no error on click).
+    const row = link.closest('tr') as HTMLElement
+    expect(row.className).toContain('cursor-pointer')
+    expect(() => fireEvent.click(row)).not.toThrow()
   })
 
   it('narrows results when filtering by the Order type dropdown', async () => {

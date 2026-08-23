@@ -7,8 +7,8 @@ test.describe('Orders detail navigation', () => {
 
     await expect(page.getByRole('table')).toBeVisible({ timeout: 5000 })
 
-    // Rows are clickable and announce the order number (orders-table.tsx aria-label).
-    await page.getByRole('row', { name: /View order 1001 details/ }).click()
+    // The Order # cell is a real link to the detail page (keyboard-accessible).
+    await page.getByRole('link', { name: /View order 1001 details/ }).click()
     await page.waitForLoadState('networkidle')
 
     // The detail heading uses the client name (ID_Order is list-only, not shown on detail).
