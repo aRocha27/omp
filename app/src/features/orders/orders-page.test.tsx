@@ -3,6 +3,20 @@ import { screen, within, fireEvent } from '@testing-library/react'
 import { OrdersPage } from '@/features/orders/orders-page'
 import { renderWithProviders } from '@/test/render-with-providers'
 
+/** Find the `<select>` whose `<option>` values include every given value. */
+function selectByOptionValues(values: string[]): HTMLSelectElement {
+  const selects = screen.getAllByRole('combobox')
+  return selects.find((s) => {
+    const opts = Array.from((s as HTMLSelectElement).options).map((o) => o.value)
+    return values.every((v) => opts.includes(v))
+  }) as HTMLSelectElement
+}
+
+/** Find the `<select>` that has an `<option>` with the given value. */
+function selectByOptionValue(value: string): HTMLSelectElement {
+  return selectByOptionValues([value])
+}
+
 describe('OrdersPage', () => {
   it('renders fixture rows ordered newest-first', async () => {
     renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
@@ -65,5 +79,33 @@ describe('OrdersPage', () => {
 
     // Clicking must not throw; navigation is exercised end-to-end by E2E.
     expect(() => fireEvent.click(rowEl)).not.toThrow()
+  })
+
+  it('narrows results when filtering by the Order type dropdown', async () => {
+    renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    await screen.findByRole('table')
+
+    // Locate the Order type select by its option value 'FAB'.
+    const typeSelect = selectByOptionValue('FAB')
+    expect(typeSelect).toBeTruthy()
+    fireEvent.change(typeSelect, { target: { value: 'FAB' } })
+
+    // FAB orders are 1002 (Client Beta) and 1003 (Test Dealer); STD orders gone.
+    expect(await screen.findByText('Client Beta')).toBeInTheDocument()
+    expect(screen.queryByText('Client Alpha')).not.toBeInTheDocument()
+    expect(screen.queryByText('Demo Hospital')).not.toBeInTheDocument()
+  })
+
+  it('narrows results when filtering by the Area dropdown', async () => {
+    renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    await screen.findByRole('table')
+
+    // Area is the only select whose options include both '1' and '2'.
+    const areaSelect = selectByOptionValues(['1', '2'])
+    fireEvent.change(areaSelect, { target: { value: '2' } })
+
+    // Area 2 orders are 1003 (Test Dealer) and 1004 (Demo Hospital).
+    expect(await screen.findByText('Test Dealer')).toBeInTheDocument()
+    expect(screen.queryByText('Client Beta')).not.toBeInTheDocument()
   })
 })

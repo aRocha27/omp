@@ -4,17 +4,34 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import type { OrderSearchFilters } from '@/domain/models/order'
+import { areas, instrumentos, orderTypes, produtos } from '@/fixtures/reference-data'
 
 export interface OrdersFiltersValue {
   clientName: string
   /** Factory-order flag (`Order_Factory`): '' = no filter. */
   orderFactory: '' | 'true' | 'false'
   idTpOrder: string
+  idArea: string
+  idProduto: string
+  idInstrumento: string
   /** PHC order ref (`Encomenda_Cli_PHC`): '' = no filter. */
   encomendaCliPHC: string
   negocioFechado: '' | 'true' | 'false'
   dateFrom: string
   dateTo: string
+}
+
+const emptyFiltersValue: OrdersFiltersValue = {
+  clientName: '',
+  orderFactory: '',
+  idTpOrder: '',
+  idArea: '',
+  idProduto: '',
+  idInstrumento: '',
+  encomendaCliPHC: '',
+  negocioFechado: '',
+  dateFrom: '',
+  dateTo: '',
 }
 
 interface OrdersFiltersProps {
@@ -27,6 +44,9 @@ interface OrdersFiltersProps {
  *
  * UI values use empty-string sentinels for "no filter"; `toSearchFilters`
  * maps them into the nullable `OrderSearchFilters` the repository expects.
+ * Categorical filters (type/area/product/instrument) are dropdowns populated
+ * from synthetic reference-data fixtures (AGENT.md §9; the HTML MVP is a UI
+ * reference only — option labels are unverified placeholders, not facts).
  */
 export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
   const set = <K extends keyof OrdersFiltersValue>(key: K, next: OrdersFiltersValue[K]) =>
@@ -46,6 +66,58 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
         </div>
       </LabeledField>
 
+      <LabeledField label="Order type">
+        <Select value={value.idTpOrder} onChange={(e) => set('idTpOrder', e.target.value)}>
+          <option value="">All</option>
+          {orderTypes.map((o) => (
+            <option key={o.id} value={String(o.id)}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      </LabeledField>
+
+      <LabeledField label="Area">
+        <Select value={value.idArea} onChange={(e) => set('idArea', e.target.value)}>
+          <option value="">All</option>
+          {areas.map((o) => (
+            <option key={o.id} value={String(o.id)}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      </LabeledField>
+
+      <LabeledField label="Product">
+        <Select value={value.idProduto} onChange={(e) => set('idProduto', e.target.value)}>
+          <option value="">All</option>
+          {produtos.map((o) => (
+            <option key={o.id} value={String(o.id)}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      </LabeledField>
+
+      <LabeledField label="Instrument">
+        <Select value={value.idInstrumento} onChange={(e) => set('idInstrumento', e.target.value)}>
+          <option value="">All</option>
+          {instrumentos.map((o) => (
+            <option key={o.id} value={String(o.id)}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      </LabeledField>
+
+      <LabeledField label="PHC ref">
+        <Input
+          placeholder="Search PHC ref"
+          value={value.encomendaCliPHC}
+          onChange={(e) => set('encomendaCliPHC', e.target.value)}
+        />
+      </LabeledField>
+
       <LabeledField label="Factory order">
         <Select
           value={value.orderFactory}
@@ -55,22 +127,6 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
           <option value="true">Yes</option>
           <option value="false">No</option>
         </Select>
-      </LabeledField>
-
-      <LabeledField label="Order type">
-        <Input
-          placeholder="Type code"
-          value={value.idTpOrder}
-          onChange={(e) => set('idTpOrder', e.target.value)}
-        />
-      </LabeledField>
-
-      <LabeledField label="PHC ref">
-        <Input
-          placeholder="Search PHC ref"
-          value={value.encomendaCliPHC}
-          onChange={(e) => set('encomendaCliPHC', e.target.value)}
-        />
       </LabeledField>
 
       <LabeledField label="Deal closed">
@@ -104,17 +160,7 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() =>
-            onChange({
-              clientName: '',
-              orderFactory: '',
-              idTpOrder: '',
-              encomendaCliPHC: '',
-              negocioFechado: '',
-              dateFrom: '',
-              dateTo: '',
-            })
-          }
+          onClick={() => onChange(emptyFiltersValue)}
           className="text-foreground/60"
         >
           <X className="size-4" aria-hidden />
@@ -144,6 +190,9 @@ export function toSearchFilters(value: OrdersFiltersValue): OrderSearchFilters {
     orderFactory:
       value.orderFactory === '' ? null : value.orderFactory === 'true',
     idTpOrder: value.idTpOrder.trim() || null,
+    idArea: value.idArea === '' ? null : Number(value.idArea),
+    idProduto: value.idProduto === '' ? null : Number(value.idProduto),
+    idInstrumento: value.idInstrumento === '' ? null : Number(value.idInstrumento),
     encomendaCliPHC: value.encomendaCliPHC.trim() || null,
     negocioFechado:
       value.negocioFechado === '' ? null : value.negocioFechado === 'true',

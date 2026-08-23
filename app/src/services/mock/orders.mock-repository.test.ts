@@ -60,6 +60,38 @@ describe('MockOrdersRepository', () => {
       const rows = await repo.search({ idProduto: 99999 })
       expect(rows).toEqual([])
     })
+
+    it('filters by idArea and excludes the null-row 1006', async () => {
+      const area1 = (await repo.search({ idArea: 1 })).map((r) => r.ID_Order)
+      expect(area1).toEqual([1002, 1001, 1005])
+      expect(area1).not.toContain(1006)
+
+      const area2 = (await repo.search({ idArea: 2 })).map((r) => r.ID_Order)
+      expect(area2).toEqual([1003, 1004])
+    })
+
+    it('filters by idProduto and excludes the null-row 1006', async () => {
+      const rows = (await repo.search({ idProduto: 10 })).map((r) => r.ID_Order)
+      expect(rows).toEqual([1001, 1005])
+      expect(rows).not.toContain(1006)
+    })
+
+    it('filters by idInstrumento and excludes null-instrument rows', async () => {
+      // 1004 and 1006 have null ID_Instrumento.
+      const rows = (await repo.search({ idInstrumento: 200 })).map((r) => r.ID_Order)
+      expect(rows).toEqual([1001])
+      expect(rows).not.toContain(1004)
+      expect(rows).not.toContain(1006)
+    })
+
+    it('filters by idTpOrder and excludes the null-row 1006', async () => {
+      const fab = (await repo.search({ idTpOrder: 'FAB' })).map((r) => r.ID_Order)
+      expect(fab).toEqual([1002, 1003])
+
+      const std = (await repo.search({ idTpOrder: 'STD' })).map((r) => r.ID_Order)
+      expect(std).toEqual([1001, 1004, 1005])
+      expect(std).not.toContain(1006)
+    })
   })
 
   describe('getById', () => {
