@@ -7,12 +7,11 @@ test.describe('Orders detail navigation', () => {
 
     await expect(page.getByRole('table')).toBeVisible({ timeout: 5000 })
 
-    // The Order # column was removed (ID_Order is DB-only); identify the row
-    // for order 1001 by its unique sell price, then click it.
-    await page.getByRole('row').filter({ hasText: '48,500' }).click()
+    // Rows are clickable and announce the order number (orders-table.tsx aria-label).
+    await page.getByRole('row', { name: /View order 1001 details/ }).click()
     await page.waitForLoadState('networkidle')
 
-    // The heading now uses the client name (ID_Order is not user-facing).
+    // The detail heading uses the client name (ID_Order is list-only, not shown on detail).
     await expect(page.getByRole('heading', { name: /Client Alpha/ })).toBeVisible({ timeout: 5000 })
     // Confirm the right order loaded via its sell price.
     await expect(page.getByText('€48,500.00')).toBeVisible()

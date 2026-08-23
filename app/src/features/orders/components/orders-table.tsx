@@ -15,6 +15,13 @@ import type { OrderSummary } from '@/domain/models/order'
 
 const columns: ColumnDef<OrderSummary>[] = [
   {
+    accessorKey: 'ID_Order',
+    header: 'Order #',
+    cell: ({ row }: CellContext<OrderSummary, unknown>) => (
+      <span className="font-medium">{row.original.ID_Order}</span>
+    ),
+  },
+  {
     accessorKey: 'DT_Order',
     header: 'Date',
     cell: ({ row }: CellContext<OrderSummary, unknown>) => (
@@ -106,11 +113,7 @@ export function OrdersTable({ data, onRowClick }: OrdersTableProps) {
               onClick={onRowClick ? () => onRowClick(row.original.ID_Order) : undefined}
               onKeyDown={onRowClick ? (e) => handleKeyDown(row, e) : undefined}
               tabIndex={clickable ? 0 : undefined}
-              aria-label={
-                clickable
-                  ? `View order for ${row.original.Client_Name ?? 'unknown client'} from ${formatOrderDate(row.original.DT_Order)}`
-                  : undefined
-              }
+              aria-label={clickable ? `View order ${row.original.ID_Order} details` : undefined}
               className={[
                 'border-t border-border transition-colors hover:bg-foreground/[0.03]',
                 clickable ? 'cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30' : '',
