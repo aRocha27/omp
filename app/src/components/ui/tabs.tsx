@@ -68,7 +68,10 @@ export function Tabs({ tabs, defaultTab, ariaLabel, className }: TabsProps) {
               role="tab"
               id={`tab-${t.id}`}
               aria-selected={selected}
-              aria-controls={`panel-${t.id}`}
+              // Only the active tab points at a panel — non-active panels are not
+              // rendered, so an unconditional aria-controls would reference ids
+              // that don't exist in the DOM (WAI-ARIA: control target must exist).
+              aria-controls={selected ? `panel-${t.id}` : undefined}
               tabIndex={selected ? 0 : -1}
               onClick={() => setActive(t.id)}
               className={cn(

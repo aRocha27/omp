@@ -91,13 +91,14 @@ export function OrdersTable({ data, onRowClick }: OrdersTableProps) {
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full border-collapse text-sm">
+      <table className="w-full border-collapse text-sm" aria-label="Orders">
         <thead className="bg-foreground/5">
           {table.getHeaderGroups().map((hg: HeaderGroup<OrderSummary>) => (
             <tr key={hg.id}>
               {hg.headers.map((header: Header<OrderSummary, unknown>) => (
                 <th
                   key={header.id}
+                  scope="col"
                   className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-foreground/60"
                 >
                   {flexRender(header.column.columnDef.header, header.getContext())}

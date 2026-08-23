@@ -56,6 +56,23 @@ describe('MockOrdersRepository', () => {
       expect(ids).not.toContain(1006)
     })
 
+    it('filters by dateTo inclusive (exact-boundary date kept)', async () => {
+      // dateTo == 1003's DT_Order (2025-08-30) — inclusive boundary.
+      const rows = await repo.search({ dateTo: '2025-08-30' })
+      const ids = rows.map((r) => r.ID_Order)
+      // 1001 & 1002 (2025-09-12) excluded; 1003 kept on the boundary.
+      expect(ids).toEqual([1003, 1004, 1005, 1006])
+      expect(ids).not.toContain(1001)
+      expect(ids).not.toContain(1002)
+    })
+
+    it('filters by dateFrom + dateTo combined (closed range)', async () => {
+      const rows = await repo.search({ dateFrom: '2025-08-01', dateTo: '2025-08-31' })
+      const ids = rows.map((r) => r.ID_Order)
+      // Only 1003 (08-30) and 1004 (08-15) fall in August 2025.
+      expect(ids).toEqual([1003, 1004])
+    })
+
     it('returns an empty array when no rows match', async () => {
       const rows = await repo.search({ idProduto: 99999 })
       expect(rows).toEqual([])
@@ -91,6 +108,16 @@ describe('MockOrdersRepository', () => {
       const std = (await repo.search({ idTpOrder: 'STD' })).map((r) => r.ID_Order)
       expect(std).toEqual([1001, 1004, 1005])
       expect(std).not.toContain(1006)
+    })
+
+    it('filters by idTipo and excludes the null-row 1006', async () => {
+      const tipo2 = (await repo.search({ idTipo: 2 })).map((r) => r.ID_Order)
+      expect(tipo2).toEqual([1002, 1001, 1005])
+      expect(tipo2).not.toContain(1006)
+
+      const tipo3 = (await repo.search({ idTipo: 3 })).map((r) => r.ID_Order)
+      expect(tipo3).toEqual([1003, 1004])
+      expect(tipo3).not.toContain(1006)
     })
   })
 

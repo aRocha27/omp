@@ -41,6 +41,13 @@ describe('OrderDetailPage', () => {
     expect(tabs[0]).toHaveAttribute('tabindex', '0')
     expect(tabs[1]).toHaveAttribute('aria-selected', 'false')
     expect(tabs[1]).toHaveAttribute('tabindex', '-1')
+
+    // The active tab controls the rendered panel and the panel is labelled by
+    // it. Non-active tabs must not point at panels that aren't in the DOM.
+    const panel = screen.getByRole('tabpanel')
+    expect(tabs[0]).toHaveAttribute('aria-controls', panel.getAttribute('id'))
+    expect(panel).toHaveAttribute('aria-labelledby', tabs[0].getAttribute('id'))
+    expect(tabs[1]).not.toHaveAttribute('aria-controls')
   })
 
   it('switches panels when a tab is clicked', async () => {
