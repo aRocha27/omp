@@ -9,7 +9,7 @@ import {
   type HeaderGroup,
   type Row,
 } from '@tanstack/react-table'
-import { Badge } from '@/components/ui/badge'
+import { DealStatusBadge } from '@/features/orders/components/order-status-badge'
 import { formatOrderDate, formatPrice } from '@/utils/format'
 import type { OrderSummary } from '@/domain/models/order'
 
@@ -58,7 +58,7 @@ const columns: ColumnDef<OrderSummary>[] = [
     accessorKey: 'Negocio_Fechado',
     header: 'Deal',
     cell: ({ row }: CellContext<OrderSummary, unknown>) =>
-      row.original.Negocio_Fechado ? <Badge tone="success">Closed</Badge> : <Badge tone="neutral">Open</Badge>,
+      <DealStatusBadge closed={row.original.Negocio_Fechado} />,
   },
   {
     accessorKey: 'Encomenda_Cli_PHC',

@@ -10,13 +10,15 @@ import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/ui/page-header'
 import { LoadingBlock } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Tabs, type TabItem } from '@/components/ui/tabs'
+import {
+  DealStatusBadge,
+  InvoicedBadge,
+  RecognizedBadge,
+} from '@/features/orders/components/order-status-badge'
 
 /** Em-dash fallback for any null/empty display value. */
 const DASH = '—'
-
-function displayBool(v: boolean | null): string {
-  return v == null ? DASH : v ? 'Yes' : 'No'
-}
 
 function displayText(v: string | null | undefined): string {
   return v && v.length > 0 ? v : DASH
@@ -24,6 +26,10 @@ function displayText(v: string | null | undefined): string {
 
 function displayNumber(v: number | null | undefined): string {
   return v == null ? DASH : String(v)
+}
+
+function displayBool(v: boolean | null): string {
+  return v == null ? DASH : v ? 'Yes' : 'No'
 }
 
 /** A labelled field cell inside a definition grid. */
@@ -38,12 +44,21 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/** Section heading that separates logical groups of fields. */
+/** Sub-section heading used inside a tab panel. */
 function SectionHeading({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/60">
+    <h3 className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-foreground/60 first:mt-0">
       {children}
-    </h2>
+    </h3>
+  )
+}
+
+/** Definition grid shared by every tab panel. */
+function FieldGrid({ children }: { children: ReactNode }) {
+  return (
+    <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
+      {children}
+    </dl>
   )
 }
 
@@ -71,9 +86,10 @@ function notFoundState(description: string) {
 /**
  * Read-only order detail page.
  *
- * Displays every §10 business field of a single `Order` using the mock
- * repository. The edit-form layout is unknown (legacy `Form_Order.cls` was not
- * exported), so this slice intentionally renders no create/edit/delete UI.
+ * The §10 business fields are split across five tabs to keep the screen legible
+ * (Overview / Client & Contact / References / Financial / Notes & Audit). The
+ * edit-form layout is unknown (legacy `Form_Order.cls` was not exported), so
+ * this slice renders no create/edit/delete UI.
  */
 export function OrderDetailPage() {
   const params = useParams<{ id: string }>()
@@ -111,8 +127,106 @@ export function OrderDetailPage() {
 
 function OrderDetail({ order }: { order: Order }) {
   const clientName = resolveClientName(order.ID_Client)
-  const dealClosed = order.Negocio_Fechado
-  const factory = order.Order_Factory
+
+  const tabs: TabItem[] = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      content: (
+        <FieldGrid>
+          <Field label="Order ID">{order.ID_Order}</Field>
+          <Field label="Order Date">{formatOrderDate(order.DT_Order)}</Field>
+          <Field label="Order Type">{displayText(order.ID_Tp_Order)}</Field>
+          <Field label="Factory Order">
+            {order.Order_Factory == null ? (
+              DASH
+            ) : (
+              // Factory is a classification, not a done/not-done status — neutral tone.
+              <Badge tone="neutral">
+                {order.Order_Factory ? 'Factory' : 'Standard'}
+              </Badge>
+            )}
+          </Field>
+          <Field label="Deal Status">
+            <DealStatusBadge closed={order.Negocio_Fechado} />
+          </Field>
+          <Field label="Facturado">
+            <InvoicedBadge invoiced={order.Facturado} />
+          </Field>
+          <Field label="Reconhecido">
+            <RecognizedBadge recognized={order.Reconhecido} />
+          </Field>
+          <Field label="Client Name">{displayText(clientName)}</Field>
+          <Field label="Client ID">{displayNumber(order.ID_Client)}</Field>
+          <Field label="Sell Price">{formatPrice(order.Sell_Price)}</Field>
+          <Field label="Warranty Reserve">{formatPrice(order.Warranty_Reserve)}</Field>
+          <Field label="PHC Order Ref">{displayText(order.Encomenda_Cli_PHC)}</Field>
+        </FieldGrid>
+      ),
+    },
+    {
+      id: 'client',
+      label: 'Client & Contact',
+      content: (
+        <FieldGrid>
+          <Field label="Client ID">{displayNumber(order.ID_Client)}</Field>
+          <Field label="Client Name">{displayText(clientName)}</Field>
+          <Field label="Contact">{displayText(order.Contacto)}</Field>
+          <Field label="Email">{displayText(order.Email)}</Field>
+          <Field label="Customer PO">{displayText(order.PO_Cliente)}</Field>
+        </FieldGrid>
+      ),
+    },
+    {
+      id: 'references',
+      label: 'References',
+      content: (
+        <FieldGrid>
+          <Field label="PHC Order Ref">{displayText(order.Encomenda_Cli_PHC)}</Field>
+          <Field label="Supplier Order Ref">{displayText(order.Cod_Enc_Fornecedor)}</Field>
+          <Field label="Area ID">{displayNumber(order.ID_Area)}</Field>
+          <Field label="Tipo ID">{displayNumber(order.ID_Tipo)}</Field>
+          <Field label="Produto ID">{displayNumber(order.ID_Produto)}</Field>
+          <Field label="Instrumento ID">{displayNumber(order.ID_Instrumento)}</Field>
+        </FieldGrid>
+      ),
+    },
+    {
+      id: 'financial',
+      label: 'Financial',
+      content: (
+        <FieldGrid>
+          <Field label="Sell Price">{formatPrice(order.Sell_Price)}</Field>
+          <Field label="Quoted Price">{formatPrice(order.Orc_Proposta)}</Field>
+          <Field label="Warranty Reserve">{formatPrice(order.Warranty_Reserve)}</Field>
+          <Field label="Warranty Type">{displayText(order.ID_Tp_Warranty)}</Field>
+          <Field label="Warranty Start">{formatOrderDate(order.Warranty_DT_Inicio)}</Field>
+          <Field label="Revenue Type">{displayText(order.ID_Tp_Revenue)}</Field>
+          <Field label="Kit">{displayBool(order.Kit)}</Field>
+          <Field label="Kit Amount">{formatPrice(order.Kit_Amount)}</Field>
+        </FieldGrid>
+      ),
+    },
+    {
+      id: 'notes',
+      label: 'Notes & Audit',
+      content: (
+        <div>
+          <SectionHeading>Notes</SectionHeading>
+          <div className="mb-6 rounded-md border border-border bg-surface p-4">
+            <p className="whitespace-pre-wrap text-sm text-foreground">
+              {order.Obs && order.Obs.length > 0 ? order.Obs : DASH}
+            </p>
+          </div>
+          <SectionHeading>Audit</SectionHeading>
+          <FieldGrid>
+            <Field label="Last User">{displayText(order.ID_User)}</Field>
+            <Field label="Last Updated">{formatOrderDate(order.DT_User)}</Field>
+          </FieldGrid>
+        </div>
+      ),
+    },
+  ]
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6">
@@ -121,69 +235,7 @@ function OrderDetail({ order }: { order: Order }) {
         description={formatOrderDate(order.DT_Order)}
         actions={<BackButton />}
       />
-
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
-        <SectionHeading>Identification</SectionHeading>
-        <Field label="Order ID">{order.ID_Order}</Field>
-        <Field label="Order Date">{formatOrderDate(order.DT_Order)}</Field>
-        <Field label="Order Type">{displayText(order.ID_Tp_Order)}</Field>
-        <Field label="Factory Order">
-          {factory == null ? (
-            DASH
-          ) : (
-            <Badge tone={factory ? 'success' : 'neutral'}>
-              {factory ? 'Factory' : 'Standard'}
-            </Badge>
-          )}
-        </Field>
-        <Field label="Deal Status">
-          {dealClosed == null ? (
-            DASH
-          ) : (
-            <Badge tone={dealClosed ? 'success' : 'neutral'}>
-              {dealClosed ? 'Closed' : 'Open'}
-            </Badge>
-          )}
-        </Field>
-        <Field label="Facturado">{displayBool(order.Facturado)}</Field>
-        <Field label="Reconhecido">{displayBool(order.Reconhecido)}</Field>
-
-        <SectionHeading>Client / contact</SectionHeading>
-        <Field label="Client ID">{displayNumber(order.ID_Client)}</Field>
-        <Field label="Client Name">{displayText(clientName)}</Field>
-        <Field label="Contact">{displayText(order.Contacto)}</Field>
-        <Field label="Email">{displayText(order.Email)}</Field>
-        <Field label="Customer PO">{displayText(order.PO_Cliente)}</Field>
-
-        <SectionHeading>References</SectionHeading>
-        <Field label="PHC Order Ref">{displayText(order.Encomenda_Cli_PHC)}</Field>
-        <Field label="Supplier Order Ref">{displayText(order.Cod_Enc_Fornecedor)}</Field>
-        <Field label="Area ID">{displayNumber(order.ID_Area)}</Field>
-        <Field label="Tipo ID">{displayNumber(order.ID_Tipo)}</Field>
-        <Field label="Produto ID">{displayNumber(order.ID_Produto)}</Field>
-        <Field label="Instrumento ID">{displayNumber(order.ID_Instrumento)}</Field>
-
-        <SectionHeading>Financial</SectionHeading>
-        <Field label="Sell Price">{formatPrice(order.Sell_Price)}</Field>
-        <Field label="Quoted Price">{formatPrice(order.Orc_Proposta)}</Field>
-        <Field label="Warranty Reserve">{formatPrice(order.Warranty_Reserve)}</Field>
-        <Field label="Warranty Type">{displayText(order.ID_Tp_Warranty)}</Field>
-        <Field label="Warranty Start">{formatOrderDate(order.Warranty_DT_Inicio)}</Field>
-        <Field label="Revenue Type">{displayText(order.ID_Tp_Revenue)}</Field>
-        <Field label="Kit">{displayBool(order.Kit)}</Field>
-        <Field label="Kit Amount">{formatPrice(order.Kit_Amount)}</Field>
-
-        <SectionHeading>Audit</SectionHeading>
-        <Field label="Last User">{displayText(order.ID_User)}</Field>
-        <Field label="Last Updated">{formatOrderDate(order.DT_User)}</Field>
-      </dl>
-
-      <SectionHeading>Notes</SectionHeading>
-      <div className="rounded-md border border-border bg-surface p-4">
-        <p className="whitespace-pre-wrap text-sm text-foreground">
-          {order.Obs && order.Obs.length > 0 ? order.Obs : DASH}
-        </p>
-      </div>
+      <Tabs tabs={tabs} ariaLabel="Order details" />
     </div>
   )
 }

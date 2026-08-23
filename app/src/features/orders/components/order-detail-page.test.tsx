@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, fireEvent } from '@testing-library/react'
 import { OrderDetailPage } from '@/features/orders/components/order-detail-page'
 import { renderWithProviders } from '@/test/render-with-providers'
 
@@ -14,14 +14,55 @@ describe('OrderDetailPage', () => {
     const heading = await screen.findByRole('heading', { name: /Order #1001/ })
     expect(heading).toBeInTheDocument()
 
-    // ID_Client 501 -> 'Client Alpha' (synthetic client name from fixtures).
+    // Overview is the default tab; it surfaces the client name + sell price.
     expect(await screen.findByText('Client Alpha')).toBeInTheDocument()
-
-    // Sell_Price 48500 -> formatted as EUR.
     expect(screen.getByText('€48,500.00')).toBeInTheDocument()
-
-    // A known field label is present (sanity check on the definition grid).
     expect(screen.getByText('Sell Price')).toBeInTheDocument()
+  })
+
+  it('renders five tabs with the Overview tab active by default', async () => {
+    renderWithProviders(<OrderDetailPage />, {
+      initialPath: '/orders/1001',
+      routePath: '/orders/:id',
+    })
+
+    const tablist = await screen.findByRole('tablist', { name: 'Order details' })
+    expect(tablist).toBeInTheDocument()
+
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(5)
+    expect(tabs[0]).toHaveTextContent('Overview')
+    expect(tabs[1]).toHaveTextContent('Client & Contact')
+    expect(tabs[2]).toHaveTextContent('References')
+    expect(tabs[3]).toHaveTextContent('Financial')
+    expect(tabs[4]).toHaveTextContent('Notes & Audit')
+
+    // Overview is selected and in the tab order; the others are not.
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[0]).toHaveAttribute('tabindex', '0')
+    expect(tabs[1]).toHaveAttribute('aria-selected', 'false')
+    expect(tabs[1]).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('switches panels when a tab is clicked', async () => {
+    renderWithProviders(<OrderDetailPage />, {
+      initialPath: '/orders/1001',
+      routePath: '/orders/:id',
+    })
+
+    await screen.findByRole('heading', { name: /Order #1001/ })
+
+    // "Quoted Price" lives only on the Financial tab — absent until switched.
+    expect(screen.queryByText('Quoted Price')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Financial' }))
+    expect(screen.getByText('Quoted Price')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Financial' })).toHaveAttribute('aria-selected', 'true')
+
+    // "Last User" lives only on the Notes & Audit tab.
+    expect(screen.queryByText('Last User')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Notes & Audit' }))
+    expect(screen.getByText('Last User')).toBeInTheDocument()
   })
 
   it('renders the not-found state when the order id does not exist', async () => {
