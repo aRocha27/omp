@@ -67,12 +67,27 @@ const columns: ColumnDef<OrderSummary>[] = [
   },
 ]
 
-export function OrdersTable({ data }: { data: OrderSummary[] }) {
+interface OrdersTableProps {
+  data: OrderSummary[]
+  /** Optional row-click handler; receives the row's `ID_Order`. */
+  onRowClick?: (id: number) => void
+}
+
+export function OrdersTable({ data, onRowClick }: OrdersTableProps) {
   const table = useReactTable<OrderSummary>({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
   })
+  const clickable = Boolean(onRowClick)
+
+  const handleKeyDown = (row: Row<OrderSummary>, e: React.KeyboardEvent<HTMLTableRowElement>) => {
+    if (!onRowClick) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onRowClick(row.original.ID_Order)
+    }
+  }
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
@@ -95,7 +110,14 @@ export function OrdersTable({ data }: { data: OrderSummary[] }) {
           {table.getRowModel().rows.map((row: Row<OrderSummary>) => (
             <tr
               key={row.id}
-              className="border-t border-border transition-colors hover:bg-foreground/[0.03]"
+              onClick={onRowClick ? () => onRowClick(row.original.ID_Order) : undefined}
+              onKeyDown={onRowClick ? (e) => handleKeyDown(row, e) : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              aria-label={clickable ? `View order ${row.original.ID_Order} details` : undefined}
+              className={[
+                'border-t border-border transition-colors hover:bg-foreground/[0.03]',
+                clickable ? 'cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30' : '',
+              ].join(' ')}
             >
               {row.getVisibleCells().map((cell: Cell<OrderSummary, unknown>) => (
                 <td key={cell.id} className="px-3 py-2 text-foreground/80">

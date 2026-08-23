@@ -19,6 +19,7 @@ const emptyFilters: OrdersFiltersValue = {
   clientName: '',
   orderFactory: '',
   idTpOrder: '',
+  encomendaCliPHC: '',
   negocioFechado: '',
   dateFrom: '',
   dateTo: '',
@@ -80,7 +81,7 @@ export function OrdersPage() {
           }
         />
       ) : (
-        <OrdersTable data={orders} />
+        <OrdersTable data={orders} onRowClick={(id) => navigate(`/orders/${id}`)} />
       )}
     </div>
   )

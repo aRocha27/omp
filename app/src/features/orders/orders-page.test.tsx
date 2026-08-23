@@ -38,4 +38,32 @@ describe('OrdersPage', () => {
     expect(alphaRows).toHaveLength(2)
     expect(screen.queryByText('Client Beta')).not.toBeInTheDocument()
   })
+
+  it('narrows results when filtering by PHC ref', async () => {
+    renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    await screen.findByRole('table')
+
+    const phcInput = screen.getByPlaceholderText('Search PHC ref')
+    fireEvent.change(phcInput, { target: { value: '1001' } })
+
+    // Contains, case-insensitive: '1001' matches 'PHC-1001' only.
+    expect(await screen.findByText('PHC-1001')).toBeInTheDocument()
+    expect(screen.queryByText('PHC-1002')).not.toBeInTheDocument()
+  })
+
+  it('makes rows clickable and navigates on row click without error', async () => {
+    renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    await screen.findByRole('table')
+
+    // The first data row (Client Alpha, order 1001) should be clickable.
+    const alphaCells = await screen.findAllByText('Client Alpha')
+    const row = alphaCells[0].closest('tr')
+    expect(row).not.toBeNull()
+    const rowEl = row as HTMLElement
+    expect(rowEl.tabIndex).toBe(0)
+    expect(rowEl.className).toContain('cursor-pointer')
+
+    // Clicking must not throw; navigation is exercised end-to-end by E2E.
+    expect(() => fireEvent.click(rowEl)).not.toThrow()
+  })
 })

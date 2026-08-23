@@ -10,6 +10,8 @@ export interface OrdersFiltersValue {
   /** Factory-order flag (`Order_Factory`): '' = no filter. */
   orderFactory: '' | 'true' | 'false'
   idTpOrder: string
+  /** PHC order ref (`Encomenda_Cli_PHC`): '' = no filter. */
+  encomendaCliPHC: string
   negocioFechado: '' | 'true' | 'false'
   dateFrom: string
   dateTo: string
@@ -63,6 +65,14 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
         />
       </LabeledField>
 
+      <LabeledField label="PHC ref">
+        <Input
+          placeholder="Search PHC ref"
+          value={value.encomendaCliPHC}
+          onChange={(e) => set('encomendaCliPHC', e.target.value)}
+        />
+      </LabeledField>
+
       <LabeledField label="Deal closed">
         <Select
           value={value.negocioFechado}
@@ -99,6 +109,7 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
               clientName: '',
               orderFactory: '',
               idTpOrder: '',
+              encomendaCliPHC: '',
               negocioFechado: '',
               dateFrom: '',
               dateTo: '',
@@ -133,6 +144,7 @@ export function toSearchFilters(value: OrdersFiltersValue): OrderSearchFilters {
     orderFactory:
       value.orderFactory === '' ? null : value.orderFactory === 'true',
     idTpOrder: value.idTpOrder.trim() || null,
+    encomendaCliPHC: value.encomendaCliPHC.trim() || null,
     negocioFechado:
       value.negocioFechado === '' ? null : value.negocioFechado === 'true',
     dateFrom: value.dateFrom || null,

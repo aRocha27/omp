@@ -10,6 +10,8 @@ import type { Role } from '@/domain/models/user'
 interface ProviderOptions {
   initialRole?: Role
   initialPath?: string
+  /** Route path to mount the UI under. Defaults to `*` (catch-all) for backward compat. */
+  routePath?: string
 }
 
 /**
@@ -19,7 +21,7 @@ interface ProviderOptions {
  */
 export function renderWithProviders(
   ui: ReactElement,
-  { initialRole, initialPath = '/' }: ProviderOptions = {},
+  { initialRole, initialPath = '/', routePath = '*' }: ProviderOptions = {},
   options?: Omit<RenderOptions, 'wrapper'>,
 ) {
   const queryClient = new QueryClient({
@@ -40,7 +42,7 @@ export function renderWithProviders(
     <RepositoryProvider>
       <MemoryRouter initialEntries={[initialPath]}>
         <Routes>
-          <Route path="*" element={ui} />
+          <Route path={routePath} element={ui} />
         </Routes>
       </MemoryRouter>
     </RepositoryProvider>,
