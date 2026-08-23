@@ -1,0 +1,227 @@
+<mxfile host="app.diagrams.net" pages="2">
+  <diagram name="1 - C4 System Context" id="g6j6G-SRF5CKjy0XhfuN">
+    <mxGraphModel dx="1700" dy="1556" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="c4title" parent="1" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#0F172A;fontSize=28;fontStyle=1;" value="&lt;b style=&quot;font-size:28px&quot;&gt;C4 System Context — Orders Web Platform&lt;/b&gt;" vertex="1">
+          <mxGeometry height="45" width="1100" x="60" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="c4sub" parent="1" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#0F172A;fontSize=13;fontColor=#475569;" value="Target context for replacing the Access UI while keeping the existing database linked as the system of record." vertex="1">
+          <mxGeometry height="35" width="1200" x="60" y="82" as="geometry" />
+        </mxCell>
+        <mxCell id="user" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#1D4ED8;strokeWidth=2;fontColor=#172554;fontSize=14;align=center;verticalAlign=middle;spacing=10;" value="&lt;b&gt;Business User&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Views/searches clients, orders, stock, invoices, recognition and reports. Edit capability depends on permission state.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="300" x="90" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="admin" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#1D4ED8;strokeWidth=2;fontColor=#172554;fontSize=14;align=center;verticalAlign=middle;spacing=10;" value="&lt;b&gt;Administrator&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Has edit capability plus maintenance-table and close-deals access in the supplied workflow.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="300" x="90" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="websys" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0F766E;strokeColor=#115E59;strokeWidth=2;fontColor=#FFFFFF;fontSize=15;align=center;verticalAlign=middle;spacing=12;" value="&lt;b&gt;Orders Web Platform&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Replacement for the Access forms/workflows.&lt;br/&gt;Dashboard • CRUD/search • recognition • reports • permissions&lt;/font&gt;" vertex="1">
+          <mxGeometry height="190" width="410" x="590" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="dbsys" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#475569;strokeWidth=2;fontColor=#0F172A;fontSize=14;align=center;verticalAlign=middle;spacing=10;" value="&lt;b&gt;Existing Linked Orders Database&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Remains the system of record.&lt;br/&gt;Client • Order • Facturacao • Reconhecimento • Factory_BK • master/reference data&lt;/font&gt;" vertex="1">
+          <mxGeometry height="190" width="330" x="1180" y="235" as="geometry" />
+        </mxCell>
+        <mxCell id="emailsys" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=2;fontColor=#431407;fontSize=14;align=center;verticalAlign=middle;spacing=10;" value="&lt;b&gt;Email / Outlook Integration&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Current workflow sends invoice emails, attaches PDFs and sends a process log through Outlook.&lt;/font&gt;" vertex="1">
+          <mxGeometry height="150" width="330" x="1180" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="c4note" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFBEB;strokeColor=#D97706;strokeWidth=1.5;fontColor=#78350F;fontSize=11;align=left;verticalAlign=top;spacing=10;" value="&lt;b&gt;Evidence boundary&lt;/b&gt;&lt;br/&gt;The supplied files confirm the Access workflow and database objects, but do not establish the target web technology, exact authentication provider, database engine/connection details, or FK cardinalities." vertex="1">
+          <mxGeometry height="120" width="760" x="540" y="650" as="geometry" />
+        </mxCell>
+        <mxCell id="ce1" edge="1" parent="1" source="user" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#64748B;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#334155;" target="websys" value="Uses">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce2" edge="1" parent="1" source="admin" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#64748B;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#334155;" target="websys" value="Uses / administers">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce3" edge="1" parent="1" source="websys" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#334155;" target="dbsys" value="Reads and writes existing data">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ce4" edge="1" parent="1" source="websys" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#334155;" target="emailsys" value="Sends invoice email / PDF workflow">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="2 - Database Logical Relations" id="amMjlUzzGw9BVZYyCsW8">
+    <mxGraphModel dx="2655" dy="1607" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=28;fontStyle=1;fontColor=#0F172A;" value="&lt;b&gt;Orders Platform — Existing Database Context &amp; Logical Relations&lt;/b&gt;" vertex="1">
+          <mxGeometry height="45" width="1500" x="60" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" parent="1" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=13;fontColor=#475569;" value="Source-grounded from the supplied Access form-class export and relationships PDF. The existing database remains the system of record." vertex="1">
+          <mxGeometry height="35" width="1600" x="60" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="web" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2FE;strokeColor=#0284C7;strokeWidth=2;fontColor=#0C4A6E;fontSize=15;align=center;verticalAlign=middle;shadow=0;" value="&lt;b&gt;New Web Platform&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:12px&quot;&gt;Dashboard • forms • reports • permissions&lt;/font&gt;" vertex="1">
+          <mxGeometry height="76" width="420" x="820" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="dbBoundary" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#94A3B8;strokeWidth=2;dashed=1;dashPattern=8 6;verticalAlign=top;align=left;spacingTop=12;spacingLeft=14;fontColor=#334155;fontSize=16;fontStyle=1;" value="&lt;b&gt;Existing Linked Orders Database&lt;/b&gt;" vertex="1">
+          <mxGeometry height="1160" width="2040" x="40" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="client" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#2563EB;strokeWidth=2;fontColor=#0F172A;fontSize=12;align=left;verticalAlign=top;spacing=10;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Client&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;&lt;b&gt;PK-ish:&lt;/b&gt; ID_Cliente&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Cliente&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;no_PHC&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;nome&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Defense&lt;/font&gt;" vertex="1">
+          <mxGeometry height="145" width="250" x="90" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="order" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#2563EB;strokeWidth=2;fontColor=#0F172A;fontSize=12;align=left;verticalAlign=top;spacing=10;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Order&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;&lt;b&gt;Key:&lt;/b&gt; ID_Order&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Client • ID_Area • ID_Tipo&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Produto • ID_Instrumento&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Order • ID_Tp_Warranty&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Revenue&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Sell_Price • Warranty_Reserve&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Negocio_Fechado&lt;/font&gt;" vertex="1">
+          <mxGeometry height="215" width="420" x="760" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="fact" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0FDFA;strokeColor=#0F766E;strokeWidth=2;fontColor=#0F172A;fontSize=12;align=left;verticalAlign=top;spacing=10;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Facturacao&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Facturacao&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Order&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Doc_FT&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;DT_Doc_FT • N_Doc_FT&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Valor_Doc_FT&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Imprimiu • Imp_Block&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Nome_PDF • E_Invoice&lt;/font&gt;" vertex="1">
+          <mxGeometry height="205" width="300" x="1390" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="recog" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0FDFA;strokeColor=#0F766E;strokeWidth=2;fontColor=#0F172A;fontSize=12;align=left;verticalAlign=top;spacing=10;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Reconhecimento&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Reconhecimento&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Order&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Reconhecimento&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;DT_Reconhecimento&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Valor_Reconhecimento&lt;/font&gt;" vertex="1">
+          <mxGeometry height="160" width="300" x="1390" y="525" as="geometry" />
+        </mxCell>
+        <mxCell id="factory" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0FDFA;strokeColor=#0F766E;strokeWidth=2;fontColor=#0F172A;fontSize=12;align=left;verticalAlign=top;spacing=10;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Factory_BK&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Factory_BK&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Order&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Cod_Enc_Factory&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Order_Confirmation • Invoice&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Ship_DT • Tracking_Number&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Weight • Provider_Invoice&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Fact_Status&lt;/font&gt;" vertex="1">
+          <mxGeometry height="205" width="300" x="1390" y="725" as="geometry" />
+        </mxCell>
+        <mxCell id="area" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Area&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Area&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Area&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Area_Cod&lt;/font&gt;" vertex="1">
+          <mxGeometry height="115" width="210" x="90" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="product" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Produto&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Produto&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Area&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Produto&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Produto_Cod&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="220" x="360" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="instrument" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Instrumento&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Instrumento&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Produto&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Instrumento&lt;/font&gt;" vertex="1">
+          <mxGeometry height="115" width="220" x="635" y="615" as="geometry" />
+        </mxCell>
+        <mxCell id="tipo" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Tipo&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tipo&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Tipo&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Warranty&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Grp_Report&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="210" x="90" y="780" as="geometry" />
+        </mxCell>
+        <mxCell id="grp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Grp_Report&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Grp_Report&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Grp_Report&lt;/font&gt;" vertex="1">
+          <mxGeometry height="100" width="220" x="360" y="810" as="geometry" />
+        </mxCell>
+        <mxCell id="tpclient" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Tp_Cliente&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Cliente&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Tp_Cliente&lt;/font&gt;" vertex="1">
+          <mxGeometry height="95" width="210" x="90" y="1040" as="geometry" />
+        </mxCell>
+        <mxCell id="tporder" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Tp_Order&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Order&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Tp_Order&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Provisoria&lt;/font&gt;" vertex="1">
+          <mxGeometry height="115" width="220" x="635" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="tprevenue" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Tp_Revenue&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Revenue&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Tp_Revenue&lt;/font&gt;" vertex="1">
+          <mxGeometry height="95" width="220" x="810" y="1040" as="geometry" />
+        </mxCell>
+        <mxCell id="tpwarranty" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Tp_Warranty&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Warranty&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Tp_Warranty&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;N_Anos&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Reserve_Ano_p&lt;/font&gt;" vertex="1">
+          <mxGeometry height="130" width="230" x="1030" y="870" as="geometry" />
+        </mxCell>
+        <mxCell id="tpdoc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Tp_Doc_FT&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Doc_FT&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Tp_Doc_FT&lt;/font&gt;" vertex="1">
+          <mxGeometry height="95" width="220" x="1810" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="tprecog" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#C2410C;strokeWidth=1.5;fontColor=#431407;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Tp_Reconhecimento&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;ID_Tp_Reconhecimento&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Tp_Reconhecimento&lt;/font&gt;" vertex="1">
+          <mxGeometry height="105" width="220" x="1830" y="552.5" as="geometry" />
+        </mxCell>
+        <mxCell id="factstatus" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F3FF;strokeColor=#7C3AED;strokeWidth=1.5;fontColor=#2E1065;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Fact_Status&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Referenced by admin form&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Factory_BK.ID_Fact_Status&lt;/font&gt;" vertex="1">
+          <mxGeometry height="105" width="220" x="1810" y="775" as="geometry" />
+        </mxCell>
+        <mxCell id="utilizador" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F3FF;strokeColor=#7C3AED;strokeWidth=1.5;fontColor=#2E1065;fontSize=11;align=left;verticalAlign=top;spacing=8;" value="&lt;b style=&quot;font-size:14px&quot;&gt;Utilizador&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;User lookup in M_Geral&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Cancelado • User_Name&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Read_Only • Admin&lt;/font&gt;" vertex="1">
+          <mxGeometry height="120" width="280" x="90" y="1190" as="geometry" />
+        </mxCell>
+        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFBEB;strokeColor=#D97706;strokeWidth=1.5;fontColor=#78350F;fontSize=11;align=left;verticalAlign=top;spacing=10;" value="&lt;b&gt;Relation semantics&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Solid line = identifier association directly used/visible in the supplied data model or VBA workflow.&lt;/font&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Purple dashed = association is supported by naming/admin usage, but FK enforcement/cardinality is not established.&lt;/font&gt;&lt;br/&gt;&lt;br/&gt;&lt;b&gt;Important:&lt;/b&gt; the source does not establish FK constraints or 1:N cardinalities, so this diagram intentionally does not claim them." vertex="1">
+          <mxGeometry height="190" width="810" x="1180" y="1110" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="web" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0284C7;strokeWidth=2.5;endArrow=none;startArrow=none;exitX=0.5;exitY=1;entryX=0.5;entryY=0;exitPerimeter=1;entryPerimeter=1;" target="order" value="read / write through application data layer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="client" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2563EB;strokeWidth=2.5;endArrow=none;startArrow=none;exitX=1;exitY=0.5;entryX=0;entryY=0.35;exitPerimeter=1;entryPerimeter=1;" target="order" value="ID_Cliente ↔ ID_Client">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="order" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=none;startArrow=none;exitX=1;exitY=0.28;entryX=0;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="fact" value="ID_Order">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="order" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=none;startArrow=none;exitX=1;exitY=0.55;entryX=0;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="recog" value="ID_Order">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="order" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#0F766E;strokeWidth=2.5;endArrow=none;startArrow=none;exitX=1;exitY=0.82;entryX=0;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="factory" value="ID_Order">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1250" y="511.29" />
+              <mxPoint x="1250" y="827.53" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="area" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=0.75;exitY=0;entryX=0;entryY=0.42;entryPerimeter=1;exitDx=0;exitDy=0;" target="order" value="ID_Area">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="247.53" y="550" />
+              <mxPoint x="360" y="550" />
+              <mxPoint x="360" y="425.29" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="tipo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=1;exitY=0.2;entryX=0;entryY=0.62;exitPerimeter=1;entryPerimeter=1;" target="order" value="ID_Tipo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="product" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=1;exitY=0.25;entryX=0;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="order" value="ID_Produto">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="620" y="632.5" />
+              <mxPoint x="620" y="442.5" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="instrument" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=1;exitY=0.25;entryX=0;entryY=0.7;exitPerimeter=1;entryPerimeter=1;" target="order" value="ID_Instrumento">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="tporder" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=0.7;exitY=0;entryX=0.25;entryY=1;exitPerimeter=1;entryPerimeter=1;" target="order" value="ID_Tp_Order">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="890" y="850" />
+              <mxPoint x="890" y="550" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="tprevenue" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=0.8;exitY=0;entryX=0.45;entryY=1;exitPerimeter=1;entryPerimeter=1;" target="order" value="ID_Tp_Revenue">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="986" y="1030" />
+              <mxPoint x="949" y="1030" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="tpwarranty" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=0.45;exitY=0;entryX=0.68;entryY=1;exitPerimeter=1;entryPerimeter=1;" target="order" value="ID_Tp_Warranty">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="area" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=1;exitY=0.65;entryX=0;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="product" value="ID_Area">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" edge="1" parent="1" source="product" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=1;exitY=0.75;entryX=0;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="instrument" value="ID_Produto">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="tipo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=1;exitY=0.65;entryX=0;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="grp" value="ID_Grp_Report">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" edge="1" parent="1" source="tpclient" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=0;exitY=0.5;entryX=0.25;entryY=1;entryPerimeter=1;exitDx=0;exitDy=0;" target="client" value="ID_Tp_Cliente">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="70" y="1087.53" />
+              <mxPoint x="70" y="474.94" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e17" edge="1" parent="1" source="tpdoc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=0;exitY=0.5;entryX=1;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="fact" value="ID_Tp_Doc_FT">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e18" edge="1" parent="1" source="tprecog" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C2410C;strokeWidth=1.8;endArrow=none;startArrow=none;exitX=0;exitY=0.5;entryX=1;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="recog" value="ID_Tp_Reconhecimento">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" edge="1" parent="1" source="factstatus" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7C3AED;strokeWidth=1.8;endArrow=none;startArrow=none;dashed=1;dashPattern=6 4;exitX=0;exitY=0.5;entryX=1;entryY=0.5;exitPerimeter=1;entryPerimeter=1;" target="factory" value="ID_Fact_Status">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e20" edge="1" parent="1" source="utilizador" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7C3AED;strokeWidth=1.7;endArrow=none;startArrow=none;dashed=1;dashPattern=6 4;exitX=0.7;exitY=0;entryX=0.15;entryY=1;exitPerimeter=1;entryPerimeter=1;" target="client" value="ID_User / audit fields">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="80" y="1190" />
+              <mxPoint x="80" y="445" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e21" edge="1" parent="1" source="utilizador" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7C3AED;strokeWidth=1.7;endArrow=none;startArrow=none;dashed=1;dashPattern=6 4;exitX=1;exitY=0.45;entryX=0;entryY=0.9;exitPerimeter=1;entryPerimeter=1;" target="order" value="ID_User / audit fields">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="610" y="1244" />
+              <mxPoint x="610" y="528.47" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
