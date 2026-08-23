@@ -134,7 +134,6 @@ function OrderDetail({ order }: { order: Order }) {
       label: 'Overview',
       content: (
         <FieldGrid>
-          <Field label="Order ID">{order.ID_Order}</Field>
           <Field label="Order Date">{formatOrderDate(order.DT_Order)}</Field>
           <Field label="Order Type">{displayText(order.ID_Tp_Order)}</Field>
           <Field label="Factory Order">
@@ -157,7 +156,6 @@ function OrderDetail({ order }: { order: Order }) {
             <RecognizedBadge recognized={order.Reconhecido} />
           </Field>
           <Field label="Client Name">{displayText(clientName)}</Field>
-          <Field label="Client ID">{displayNumber(order.ID_Client)}</Field>
           <Field label="Sell Price">{formatPrice(order.Sell_Price)}</Field>
           <Field label="Warranty Reserve">{formatPrice(order.Warranty_Reserve)}</Field>
           <Field label="PHC Order Ref">{displayText(order.Encomenda_Cli_PHC)}</Field>
@@ -169,7 +167,6 @@ function OrderDetail({ order }: { order: Order }) {
       label: 'Client & Contact',
       content: (
         <FieldGrid>
-          <Field label="Client ID">{displayNumber(order.ID_Client)}</Field>
           <Field label="Client Name">{displayText(clientName)}</Field>
           <Field label="Contact">{displayText(order.Contacto)}</Field>
           <Field label="Email">{displayText(order.Email)}</Field>
@@ -231,7 +228,10 @@ function OrderDetail({ order }: { order: Order }) {
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6">
       <PageHeader
-        title={`Order #${order.ID_Order}`}
+        // The DB surrogate (ID_Order) is not user-facing; the heading uses the
+        // client name + order date instead. ID_Order stays internal as the route
+        // param used to fetch the record.
+        title={clientName ?? 'Order'}
         description={formatOrderDate(order.DT_Order)}
         actions={<BackButton />}
       />

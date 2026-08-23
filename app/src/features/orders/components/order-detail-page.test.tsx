@@ -10,12 +10,11 @@ describe('OrderDetailPage', () => {
       routePath: '/orders/:id',
     })
 
-    // Heading implicitly waits for the async fetch to resolve.
-    const heading = await screen.findByRole('heading', { name: /Order #1001/ })
+    // The heading uses the client name (the DB id ID_Order is not user-facing).
+    const heading = await screen.findByRole('heading', { name: /Client Alpha/ })
     expect(heading).toBeInTheDocument()
 
-    // Overview is the default tab; it surfaces the client name + sell price.
-    expect(await screen.findByText('Client Alpha')).toBeInTheDocument()
+    // Overview is the default tab; it surfaces the sell price.
     expect(screen.getByText('€48,500.00')).toBeInTheDocument()
     expect(screen.getByText('Sell Price')).toBeInTheDocument()
   })
@@ -50,9 +49,7 @@ describe('OrderDetailPage', () => {
       routePath: '/orders/:id',
     })
 
-    await screen.findByRole('heading', { name: /Order #1001/ })
-
-    // "Quoted Price" lives only on the Financial tab — absent until switched.
+    await screen.findByRole('heading', { name: /Client Alpha/ })
     expect(screen.queryByText('Quoted Price')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Financial' }))

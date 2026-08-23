@@ -7,14 +7,15 @@ test.describe('Orders detail navigation', () => {
 
     await expect(page.getByRole('table')).toBeVisible({ timeout: 5000 })
 
-    // Rows are clickable and announce the order id (orders-table.tsx aria-label).
-    await page.getByRole('row', { name: /View order 1001 details/ }).click()
+    // The Order # column was removed (ID_Order is DB-only); identify the row
+    // for order 1001 by its unique sell price, then click it.
+    await page.getByRole('row').filter({ hasText: '48,500' }).click()
     await page.waitForLoadState('networkidle')
 
-    // Detail page renders the order heading and the resolved client name.
-    await expect(page.getByRole('heading', { name: /Order #1001/ })).toBeVisible({ timeout: 5000 })
-    // Exact match — "Client Alpha" also appears in the Obs notes text.
-    await expect(page.getByText('Client Alpha', { exact: true })).toBeVisible()
+    // The heading now uses the client name (ID_Order is not user-facing).
+    await expect(page.getByRole('heading', { name: /Client Alpha/ })).toBeVisible({ timeout: 5000 })
+    // Confirm the right order loaded via its sell price.
+    await expect(page.getByText('€48,500.00')).toBeVisible()
   })
 
   test('an invalid order id shows the not-found state', async ({ page }) => {
