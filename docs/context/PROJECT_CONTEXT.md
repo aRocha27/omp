@@ -32,6 +32,7 @@ The database will be integrated later, during MVP/integration work.
 8. **The current objective is a high-quality, testable, production-capable frontend architecture.**
 9. **Security-sensitive behavior must be designed now even if enforcement is completed later in the backend.**
 10. **Every feature must be implemented with future real-database integration in mind.**
+11. **SQL Server must not be publicly exposed; it is reachable only via LAN, private VPN/network, or approved cloud networking — see SECURITY.md §16.**
 
 ---
 

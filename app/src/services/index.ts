@@ -7,20 +7,50 @@
  */
 import { env } from '@/app/configuration/env'
 import type { OrdersRepository } from './contracts/orders.repository'
+import type { ClientsRepository } from './contracts/clients.repository'
+import type { ReconhecimentoRepository } from './contracts/reconhecimento.repository'
+import type { DocumentoFaturacaoRepository } from './contracts/documento-faturacao.repository'
 import { MockOrdersRepository } from './mock/orders.mock-repository'
+import { HttpOrdersRepository } from './http/orders.http-repository'
+import { HttpClientsRepository } from './http/clients.http-repository'
+import { MockReconhecimentoRepository } from './mock/reconhecimento.mock-repository'
+import { MockDocumentoFaturacaoRepository } from './mock/documento-faturacao.mock-repository'
+import { HttpReconhecimentoRepository } from './http/reconhecimento.http-repository'
+import { HttpDocumentoFaturacaoRepository } from './http/documento-faturacao.http-repository'
 
 export interface Repositories {
   orders: OrdersRepository
+  // Clients are HTTP-only in BOTH data modes — the user explicitly wants no
+  // fictitious client data, so there's no mock repository for them. In `mock`
+  // mode without a server the Clients tab errors out (intended).
+  clients: ClientsRepository
+  reconhecimentos: ReconhecimentoRepository
+  facturacao: DocumentoFaturacaoRepository
 }
 
 export function createRepositories(): Repositories {
+  // Clients are always live — the client directory reads through the Node API in
+  // both `api` and `mock` data modes.
+  const clients = new HttpClientsRepository()
+  // `api` reads live from the Node API (query-on-demand, DB is system of record).
+  // `mock` (default) keeps the self-contained fixture-backed repository for dev/CI.
   if (env.dataMode === 'api') {
-    // HttpOrdersRepository is implemented during the integration phase.
-    throw new Error(
-      'DATA_MODE=api is not supported yet — the HTTP repository is implemented during the integration phase.',
-    )
+    return {
+      orders: new HttpOrdersRepository(),
+      clients,
+      // Live sub-table reads (dbo.Reconhecimento / dbo.Facturacao) — no fictitious
+      // data on the Revenue/Invoicing tabs. `add` throws (live write is a flagged
+      // follow-up); the order-detail page hides the add actions in api mode.
+      reconhecimentos: new HttpReconhecimentoRepository(),
+      facturacao: new HttpDocumentoFaturacaoRepository(),
+    }
   }
-  return { orders: new MockOrdersRepository() }
+  return {
+    orders: new MockOrdersRepository(),
+    clients,
+    reconhecimentos: new MockReconhecimentoRepository(),
+    facturacao: new MockDocumentoFaturacaoRepository(),
+  }
 }
 
 export * from './contracts'

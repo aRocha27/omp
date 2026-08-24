@@ -4,13 +4,14 @@ import { toSearchFilters, type OrdersFiltersValue } from '@/features/orders/comp
 describe('toSearchFilters', () => {
   const base: OrdersFiltersValue = {
     clientName: '',
-    orderFactory: '',
-    idTpOrder: '',
-    idArea: '',
-    idProduto: '',
-    idInstrumento: '',
+    orderFactory: false,
+    idTpOrder: [],
+    idArea: [],
+    idTipo: [],
+    idProduto: [],
+    idInstrumento: [],
     encomendaCliPHC: '',
-    negocioFechado: '',
+    negocioFechado: false,
     dateFrom: '',
     dateTo: '',
   }
@@ -21,6 +22,7 @@ describe('toSearchFilters', () => {
       orderFactory: null,
       idTpOrder: null,
       idArea: null,
+      idTipo: null,
       idProduto: null,
       idInstrumento: null,
       encomendaCliPHC: null,
@@ -30,29 +32,34 @@ describe('toSearchFilters', () => {
     })
   })
 
-  it('converts numeric dropdown ids from string to number', () => {
+  it('passes the area and tipo string code arrays through verbatim', () => {
+    const filters = toSearchFilters({ ...base, idArea: ['BDAL'], idTipo: ['INSTR'] })
+    expect(filters.idArea).toEqual(['BDAL'])
+    expect(filters.idTipo).toEqual(['INSTR'])
+    expect(Array.isArray(filters.idArea)).toBe(true)
+  })
+
+  it('passes the numeric product and instrument id arrays through verbatim', () => {
     const filters = toSearchFilters({
       ...base,
-      idArea: '2',
-      idProduto: '11',
-      idInstrumento: '201',
+      idProduto: [11],
+      idInstrumento: [8],
     })
-    expect(filters.idArea).toBe(2)
-    expect(filters.idProduto).toBe(11)
-    expect(filters.idInstrumento).toBe(201)
-    expect(typeof filters.idArea).toBe('number')
+    expect(filters.idProduto).toEqual([11])
+    expect(filters.idInstrumento).toEqual([8])
+    expect(Array.isArray(filters.idProduto)).toBe(true)
   })
 
-  it('maps boolean dropdowns to true/false and empty to null', () => {
-    expect(toSearchFilters({ ...base, orderFactory: 'true' }).orderFactory).toBe(true)
-    expect(toSearchFilters({ ...base, orderFactory: 'false' }).orderFactory).toBe(false)
-    expect(toSearchFilters({ ...base, orderFactory: '' }).orderFactory).toBeNull()
-    expect(toSearchFilters({ ...base, negocioFechado: 'true' }).negocioFechado).toBe(true)
+  it('maps boolean checkboxes to true and unchecked to null', () => {
+    expect(toSearchFilters({ ...base, orderFactory: true }).orderFactory).toBe(true)
+    expect(toSearchFilters({ ...base, orderFactory: false }).orderFactory).toBeNull()
+    expect(toSearchFilters({ ...base, negocioFechado: true }).negocioFechado).toBe(true)
+    expect(toSearchFilters({ ...base, negocioFechado: false }).negocioFechado).toBeNull()
   })
 
-  it('trims text filters and treats whitespace-only as null', () => {
+  it('trims text filters, treats whitespace-only as null, and passes code arrays through', () => {
     expect(toSearchFilters({ ...base, clientName: '  Alpha  ' }).clientName).toBe('Alpha')
     expect(toSearchFilters({ ...base, clientName: '   ' }).clientName).toBeNull()
-    expect(toSearchFilters({ ...base, idTpOrder: 'FAB' }).idTpOrder).toBe('FAB')
+    expect(toSearchFilters({ ...base, idTpOrder: ['COM'] }).idTpOrder).toEqual(['COM'])
   })
 })

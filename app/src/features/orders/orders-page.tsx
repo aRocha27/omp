@@ -15,17 +15,27 @@ import {
 } from '@/features/orders/components/orders-filters'
 import { OrdersTable } from '@/features/orders/components/orders-table'
 
+/** Initial/cleared filter state: every categorical empty, both toggles off, text empty. */
 const emptyFilters: OrdersFiltersValue = {
   clientName: '',
-  orderFactory: '',
-  idTpOrder: '',
-  idArea: '',
-  idProduto: '',
-  idInstrumento: '',
+  orderFactory: false,
+  idTpOrder: [],
+  idArea: [],
+  idTipo: [],
+  idProduto: [],
+  idInstrumento: [],
   encomendaCliPHC: '',
-  negocioFechado: '',
+  negocioFechado: false,
   dateFrom: '',
   dateTo: '',
+}
+
+/** A filter value is "active" if it's a non-empty string, a non-empty array, or `true`.
+ * Empty strings, empty arrays, and `false` mean "no filter". */
+function isFilterActive(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'boolean') return value
+  return value !== ''
 }
 
 export function OrdersPage() {
@@ -38,7 +48,7 @@ export function OrdersPage() {
 
   const showCreate = canEdit(user)
   const orders = data ?? []
-  const hasActiveFilters = Object.values(filters).some((v) => v !== '')
+  const hasActiveFilters = Object.values(filters).some(isFilterActive)
 
   return (
     <div>

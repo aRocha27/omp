@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { MockOrdersRepository } from '@/services/mock/orders.mock-repository'
+import { RepositoryError } from '@/services/contracts/orders.repository'
 
 describe('MockOrdersRepository', () => {
   const repo = new MockOrdersRepository()
@@ -74,50 +75,50 @@ describe('MockOrdersRepository', () => {
     })
 
     it('returns an empty array when no rows match', async () => {
-      const rows = await repo.search({ idProduto: 99999 })
+      const rows = await repo.search({ idProduto: [99999] })
       expect(rows).toEqual([])
     })
 
     it('filters by idArea and excludes the null-row 1006', async () => {
-      const area1 = (await repo.search({ idArea: 1 })).map((r) => r.ID_Order)
+      const area1 = (await repo.search({ idArea: ['BDAL'] })).map((r) => r.ID_Order)
       expect(area1).toEqual([1002, 1001, 1005])
       expect(area1).not.toContain(1006)
 
-      const area2 = (await repo.search({ idArea: 2 })).map((r) => r.ID_Order)
+      const area2 = (await repo.search({ idArea: ['BOPT'] })).map((r) => r.ID_Order)
       expect(area2).toEqual([1003, 1004])
     })
 
     it('filters by idProduto and excludes the null-row 1006', async () => {
-      const rows = (await repo.search({ idProduto: 10 })).map((r) => r.ID_Order)
+      const rows = (await repo.search({ idProduto: [10] })).map((r) => r.ID_Order)
       expect(rows).toEqual([1001, 1005])
       expect(rows).not.toContain(1006)
     })
 
     it('filters by idInstrumento and excludes null-instrument rows', async () => {
       // 1004 and 1006 have null ID_Instrumento.
-      const rows = (await repo.search({ idInstrumento: 200 })).map((r) => r.ID_Order)
+      const rows = (await repo.search({ idInstrumento: [1] })).map((r) => r.ID_Order)
       expect(rows).toEqual([1001])
       expect(rows).not.toContain(1004)
       expect(rows).not.toContain(1006)
     })
 
     it('filters by idTpOrder and excludes the null-row 1006', async () => {
-      const fab = (await repo.search({ idTpOrder: 'FAB' })).map((r) => r.ID_Order)
-      expect(fab).toEqual([1002, 1003])
+      const com = (await repo.search({ idTpOrder: ['COM'] })).map((r) => r.ID_Order)
+      expect(com).toEqual([1002, 1003])
 
-      const std = (await repo.search({ idTpOrder: 'STD' })).map((r) => r.ID_Order)
-      expect(std).toEqual([1001, 1004, 1005])
-      expect(std).not.toContain(1006)
+      const client = (await repo.search({ idTpOrder: ['C'] })).map((r) => r.ID_Order)
+      expect(client).toEqual([1001, 1004, 1005])
+      expect(client).not.toContain(1006)
     })
 
     it('filters by idTipo and excludes the null-row 1006', async () => {
-      const tipo2 = (await repo.search({ idTipo: 2 })).map((r) => r.ID_Order)
-      expect(tipo2).toEqual([1002, 1001, 1005])
-      expect(tipo2).not.toContain(1006)
+      const instr = (await repo.search({ idTipo: ['INSTR'] })).map((r) => r.ID_Order)
+      expect(instr).toEqual([1002, 1001, 1005])
+      expect(instr).not.toContain(1006)
 
-      const tipo3 = (await repo.search({ idTipo: 3 })).map((r) => r.ID_Order)
-      expect(tipo3).toEqual([1003, 1004])
-      expect(tipo3).not.toContain(1006)
+      const acess = (await repo.search({ idTipo: ['ACESS'] })).map((r) => r.ID_Order)
+      expect(acess).toEqual([1003, 1004])
+      expect(acess).not.toContain(1006)
     })
   })
 
@@ -132,10 +133,10 @@ describe('MockOrdersRepository', () => {
       expect(order?.Sell_Price).toBe(48500)
       expect(order?.Encomenda_Cli_PHC).toBe('PHC-1001')
       expect(order?.Negocio_Fechado).toBe(false)
-      expect(order?.Orc_Proposta).toBe(47000)
-      expect(order?.ID_Tp_Warranty).toBe('STD')
+      expect(order?.Orc_Proposta).toBe('ORC-1001')
+      expect(order?.ID_Tp_Warranty).toBe(1)
       expect(order?.Warranty_Reserve).toBe(1455)
-      expect(order?.ID_Tp_Revenue).toBe('REV-STD')
+      expect(order?.ID_Tp_Revenue).toBe(1)
       expect(order?.Facturado).toBe(false)
       expect(order?.Reconhecido).toBe(false)
       expect(order?.Kit).toBe(false)
@@ -157,6 +158,29 @@ describe('MockOrdersRepository', () => {
     it('returns null for an unknown id', async () => {
       const order = await repo.getById(99999)
       expect(order).toBeNull()
+    })
+  })
+
+  describe('update', () => {
+    it('applies a patch and persists it for a subsequent getById', async () => {
+      // Fixture 1001 starts at Sell_Price 48500 (see fixtures/orders.ts).
+      const before = await repo.getById(1001)
+      expect(before?.Sell_Price).toBe(48500)
+
+      const updated = await repo.update(1001, { Sell_Price: 51200 }, 'editor')
+      expect(updated.ID_Order).toBe(1001)
+      expect(updated.Sell_Price).toBe(51200)
+
+      // The mock mutates the fixture entry in place, so the next read sees the
+      // new value (mirrors how the live DB persists the update).
+      const after = await repo.getById(1001)
+      expect(after?.Sell_Price).toBe(51200)
+    })
+
+    it('throws a not-found RepositoryError for an unknown id', async () => {
+      const error = await repo.update(99999, { Sell_Price: 1 }, 'admin').catch((e) => e)
+      expect(error).toBeInstanceOf(RepositoryError)
+      expect(error).toMatchObject({ kind: 'not-found', message: 'Order not found.' })
     })
   })
 })

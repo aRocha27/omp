@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
-import type { Role, User } from '@/domain/models/user'
+import type { Role, RoleLike, User } from '@/domain/models/user'
 import { deriveRole } from '@/domain/models/user'
 
 /**
@@ -12,20 +12,15 @@ import { deriveRole } from '@/domain/models/user'
  */
 
 const mockUsers: Record<Role, User> = {
-  viewer: {
+  user: {
     ID_User: 1,
-    User_Name: 'Demo Viewer',
-    role: 'viewer',
-    Read_Only: true,
-    Admin: false,
-  },
-  editor: {
-    ID_User: 2,
-    User_Name: 'Demo Editor',
-    role: 'editor',
+    User_Name: 'Demo User',
+    role: 'user',
     Read_Only: false,
     Admin: false,
   },
+  viewer: { ID_User: 4, User_Name: 'Legacy Viewer', role: 'viewer', Read_Only: true, Admin: false },
+  editor: { ID_User: 5, User_Name: 'Legacy Editor', role: 'editor', Read_Only: false, Admin: false },
   admin: {
     ID_User: 3,
     User_Name: 'Demo Admin',
@@ -35,7 +30,7 @@ const mockUsers: Record<Role, User> = {
   },
 }
 
-export const roles: Role[] = ['viewer', 'editor', 'admin']
+export const roles: Role[] = ['user', 'admin']
 
 interface UserContextValue {
   user: User
@@ -44,11 +39,11 @@ interface UserContextValue {
 
 const UserContext = createContext<UserContextValue | null>(null)
 
-export function UserProvider({ children, initialRole = 'editor' }: { children: ReactNode; initialRole?: Role }) {
+export function UserProvider({ children, initialRole = 'user' }: { children: ReactNode; initialRole?: RoleLike }) {
   const [role, setRole] = useState<Role>(initialRole)
   const value = useMemo<UserContextValue>(() => {
     const user = mockUsers[role]
-    return { user, setRole }
+    return { user, setRole: (next) => setRole(next === 'admin' || next === 'user' || next === 'editor' || next === 'viewer' ? next : 'viewer') }
   }, [role])
   return <UserContext value={value}>{children}</UserContext>
 }
@@ -62,7 +57,7 @@ export function useCurrentUser(): User {
 export function useRoleSwitcher(): { role: Role; setRole: (r: Role) => void; roles: Role[] } {
   const ctx = useContext(UserContext)
   if (!ctx) throw new Error('useRoleSwitcher must be used within <UserProvider>')
-  return { role: ctx.user.role, setRole: ctx.setRole, roles }
+  return { role: ctx.user.role as Role, setRole: ctx.setRole, roles }
 }
 
 /** Re-export for convenience in components that derive roles. */

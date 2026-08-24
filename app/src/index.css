@@ -25,6 +25,8 @@
   --color-danger: #b91c1c;
   --color-danger-muted: #fee2e2;
 
+  --color-violet: #9333ea;
+
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }

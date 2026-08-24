@@ -4,11 +4,15 @@
  * Maps the confirmed legacy `Utilizador` fields (AGENT.md §5) to an
  * application-side user concept. The web app may replace Windows/VBA identity
  * acquisition with an identity provider, but must preserve the effective
- * permission semantics: read-only, editor, administrator.
+ * permission semantics: USER and ADMIN.
  */
 
 /** Effective application roles, derived from `Utilizador.Read_Only` / `Admin`. */
-export type Role = 'viewer' | 'editor' | 'admin'
+// Only USER and ADMIN are selectable. Legacy values remain accepted at the type
+// boundary while existing persisted/demo data is migrated.
+export type Role = 'user' | 'admin' | 'viewer' | 'editor'
+export type LegacyRole = 'viewer' | 'editor'
+export type RoleLike = Role
 
 /**
  * Application user.
@@ -19,7 +23,7 @@ export type Role = 'viewer' | 'editor' | 'admin'
 export interface User {
   ID_User: number
   User_Name: string
-  role: Role
+  role: RoleLike
   /** Maps to `Utilizador.Read_Only`. */
   Read_Only: boolean
   /** Maps to `Utilizador.Admin`. */
@@ -34,6 +38,5 @@ export interface User {
  */
 export function deriveRole(user: Pick<User, 'Read_Only' | 'Admin'>): Role {
   if (user.Admin) return 'admin'
-  if (user.Read_Only) return 'viewer'
-  return 'editor'
+  return 'user'
 }

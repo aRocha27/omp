@@ -1,6 +1,7 @@
 import {
   flexRender,
   getCoreRowModel,
+  getSortedRowModel,
   useReactTable,
   type Cell,
   type CellContext,
@@ -8,7 +9,10 @@ import {
   type Header,
   type HeaderGroup,
   type Row,
+  type SortingState,
 } from '@tanstack/react-table'
+import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DealStatusBadge } from '@/features/orders/components/order-status-badge'
 import { orderTypeLabel } from '@/features/orders/components/reference-labels'
@@ -83,10 +87,19 @@ interface OrdersTableProps {
 }
 
 export function OrdersTable({ data, onRowClick }: OrdersTableProps) {
+  // Start sorted by Date descending so the header reflects the server's newest-first order
+  // and the sort control is discoverable. Toggling a header flips asc <-> desc (no "clear"
+  // middle state), so the table always has a defined order.
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'DT_Order', desc: true }])
+
   const table = useReactTable<OrderSummary>({
     data,
     columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    enableSortingRemoval: false,
     getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   })
   const clickable = Boolean(onRowClick)
 
@@ -96,15 +109,21 @@ export function OrdersTable({ data, onRowClick }: OrdersTableProps) {
         <thead className="bg-foreground/5">
           {table.getHeaderGroups().map((hg: HeaderGroup<OrderSummary>) => (
             <tr key={hg.id}>
-              {hg.headers.map((header: Header<OrderSummary, unknown>) => (
-                <th
-                  key={header.id}
-                  scope="col"
-                  className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-foreground/60"
-                >
-                  {flexRender(header.column.columnDef.header, header.getContext())}
-                </th>
-              ))}
+              {hg.headers.map((header: Header<OrderSummary, unknown>) => {
+                const direction = header.column.getIsSorted()
+                const ariaSort =
+                  direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none'
+                return (
+                  <th
+                    key={header.id}
+                    scope="col"
+                    aria-sort={ariaSort}
+                    className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-foreground/60"
+                  >
+                    {header.isPlaceholder ? null : <SortHeader header={header} direction={direction} />}
+                  </th>
+                )
+              })}
             </tr>
           ))}
         </thead>
@@ -129,4 +148,35 @@ export function OrdersTable({ data, onRowClick }: OrdersTableProps) {
       </table>
     </div>
   )
+}
+
+/** Sortable column header: a button that toggles asc/desc with a directional indicator.
+ * The visible label comes from the column def; the button's accessible name announces the
+ * current sort state so screen-reader users know what clicking will do. */
+function SortHeader({
+  header,
+  direction,
+}: {
+  header: Header<OrderSummary, unknown>
+  direction: false | 'asc' | 'desc'
+}) {
+  const label = String(header.column.columnDef.header)
+  const state = direction === 'asc' ? 'sorted ascending' : direction === 'desc' ? 'sorted descending' : 'not sorted'
+  return (
+    <button
+      type="button"
+      onClick={header.column.getToggleSortingHandler()}
+      className="group inline-flex items-center gap-1 text-foreground/60 transition-colors hover:text-foreground"
+      aria-label={`${label}, ${state}. Activate to sort ${direction === 'asc' ? 'descending' : 'ascending'}.`}
+    >
+      <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
+      <SortIcon direction={direction} />
+    </button>
+  )
+}
+
+function SortIcon({ direction }: { direction: false | 'asc' | 'desc' }) {
+  if (direction === 'asc') return <ArrowUp className="size-3.5" aria-hidden />
+  if (direction === 'desc') return <ArrowDown className="size-3.5" aria-hidden />
+  return <ChevronsUpDown className="size-3.5 opacity-40" aria-hidden />
 }

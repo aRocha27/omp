@@ -271,3 +271,24 @@ A feature involving sensitive data is not production-ready until:
 3. Backend validation exists.
 4. Audit behavior exists where required.
 5. Integration/security tests pass.
+
+---
+
+# 16. Network exposure of SQL Server
+
+The application must support SQL Server reachable through LAN, private VPN/network, or approved cloud networking. Direct public exposure of the SQL Server service (port 1433 to the internet) is not an accepted production architecture.
+
+---
+
+# 17. Orders and Clients read paths — tokenless loopback, read-only
+
+The Orders (`/api/orders/*`) and Clients (`/api/clients/*`) endpoints share a single server-configured managed profile (`ORDERS_PROFILE_ID`, falling back to the first declared profile). The password lives only in env, never reaches a request body or response.
+
+Current phase (dev only):
+
+- Both read paths are **read-only**. The only mutation endpoint in this group is `/api/orders/update`; `/api/clients/*` and the sub-table GETs (`/api/orders/reconhecimentos`, `/api/orders/facturacao`) never write.
+- Auth mirrors the Orders tab: tokenless on loopback (HOST must be 127.0.0.1/::1/localhost when `ADMIN_API_TOKEN` is unset, enforced by the boot guard in `buildAdminAuthConfig`). No browser ever sends credentials.
+- The `upsize_ts` rowversion column on `dbo.Client`, `dbo.Reconhecimento`, and `dbo.Facturacao` is always stripped (never selected or serialized) — it is opaque and must never reach the client.
+- All SQL is parameterized; user input (search text, `idTpCliente`, `orderId`, `id`) is bound, never interpolated.
+
+Deferred to R-A (real auth): in any non-loopback deployment `ADMIN_API_TOKEN` is required, and the browser would 401 against these endpoints because they have no token in their contract yet. Per-user authorization (session/JWT bound to a role) must replace the dev `x-user-role` header before the Orders update path ships to a non-loopback host.
