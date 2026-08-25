@@ -4,7 +4,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   canRecognize,
+  isWarrantyRecognition,
   recognitionCapacity,
+  recognitionTotals,
+  reconhecimentoEstado,
+  WARRANTY_RECOGNITION_TYPES,
   WARRANTY_RECOGNITION_TYPE,
 } from '@/domain/rules/recognition'
 
@@ -29,6 +33,22 @@ describe('recognitionCapacity', () => {
           ID_Tp_Reconhecimento: 'SERVICE',
         }),
       ).toBe(900)
+    })
+
+    it('uses the full Sell Price and blocks warranty when Tipo.Warranty is false', () => {
+      const nonWarrantyOrder = {
+        Sell_Price: 10_000,
+        Warranty_Reserve: 2_000,
+        Tipo_Warranty: false,
+      }
+      expect(recognitionCapacity({
+        ...nonWarrantyOrder,
+        ID_Tp_Reconhecimento: 'CM',
+      })).toBe(10_000)
+      expect(recognitionCapacity({
+        ...nonWarrantyOrder,
+        ID_Tp_Reconhecimento: 'WP',
+      })).toBe(0)
     })
 
     it('returns null when Sell_Price is missing (cannot compute non-warranty max)', () => {
@@ -166,5 +186,155 @@ describe('canRecognize', () => {
     // warranty capacity = 2_000 regardless of Sell_Price
     expect(canRecognize(warrantyOrder, 0, 2_000).ok).toBe(true)
     expect(canRecognize(warrantyOrder, 0, 2_001).ok).toBe(false)
+  })
+})
+
+describe('isWarrantyRecognition', () => {
+  it('treats "W" and "WP" as the warranty side', () => {
+    expect(isWarrantyRecognition('W')).toBe(true)
+    expect(isWarrantyRecognition('WP')).toBe(true)
+  })
+
+  it('treats CM/P/T and null as the instrument side', () => {
+    expect(isWarrantyRecognition('CM')).toBe(false)
+    expect(isWarrantyRecognition('P')).toBe(false)
+    expect(isWarrantyRecognition('T')).toBe(false)
+    expect(isWarrantyRecognition(null)).toBe(false)
+    expect(isWarrantyRecognition(undefined)).toBe(false)
+  })
+
+  it('WARRANTY_RECOGNITION_TYPES is W and WP', () => {
+    expect([...WARRANTY_RECOGNITION_TYPES]).toEqual(['W', 'WP'])
+  })
+
+  it('WP draws from the warranty bucket, not the instrument bucket', () => {
+    // capacity for WP must equal Warranty_Reserve (2_000), NOT Sell_Price - reserve (8_000)
+    expect(
+      recognitionCapacity({
+        Sell_Price: 10_000,
+        Warranty_Reserve: 2_000,
+        ID_Tp_Reconhecimento: 'WP',
+      }),
+    ).toBe(2_000)
+  })
+})
+
+describe('recognitionTotals', () => {
+  // Order 1001 fixture: Sell_Price 48_500, Warranty_Reserve 1_455.
+  const order = { Sell_Price: 48_500, Warranty_Reserve: 1_455 }
+  type Reco = { ID_Tp_Reconhecimento: string | null; Valor_Reconhecimento: number | null }
+
+  it('splits rows into instrument and warranty buckets', () => {
+    const recos: Reco[] = [
+      { ID_Tp_Reconhecimento: 'T', Valor_Reconhecimento: 35_000 },
+      { ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: 500 },
+    ]
+    const totals = recognitionTotals(order, recos)
+    expect(totals.instrumentReconhecido).toBe(35_000)
+    expect(totals.warrantyReconhecido).toBe(500)
+    expect(totals.totalReconhecido).toBe(35_500)
+  })
+
+  it('Instrumento por Reconhecer = (Sell_Price − Warranty_Reserve) − instrumentReconhecido', () => {
+    // The corrected formula (req 9): 48_500 − 1_455 − 35_000 = 12_045.
+    // The old UI omitted the − Warranty_Reserve term and returned 13_500.
+    const recos: Reco[] = [
+      { ID_Tp_Reconhecimento: 'T', Valor_Reconhecimento: 35_000 },
+    ]
+    const totals = recognitionTotals(order, recos)
+    expect(totals.instrumentPorReconhecer).toBe(12_045)
+  })
+
+  it('Garantia por Reconhecer = Warranty_Reserve − warrantyReconhecido', () => {
+    const recos: Reco[] = [{ ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: 455 }]
+    const totals = recognitionTotals(order, recos)
+    expect(totals.warrantyPorReconhecer).toBe(1_000)
+  })
+
+  it('clamps por-reconhecer at 0 when recognized exceeds capacity', () => {
+    const recos: Reco[] = [{ ID_Tp_Reconhecimento: 'T', Valor_Reconhecimento: 60_000 }]
+    const totals = recognitionTotals(order, recos)
+    expect(totals.instrumentPorReconhecer).toBe(0)
+  })
+
+  it('treats W and WP together as the warranty bucket', () => {
+    const recos: Reco[] = [
+      { ID_Tp_Reconhecimento: 'W', Valor_Reconhecimento: 300 },
+      { ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: 455 },
+    ]
+    const totals = recognitionTotals(order, recos)
+    expect(totals.warrantyReconhecido).toBe(755)
+    expect(totals.warrantyPorReconhecer).toBe(700)
+  })
+
+  it('treats null/undefined Valor_Reconhecimento as 0', () => {
+    const recos: Reco[] = [
+      { ID_Tp_Reconhecimento: 'T', Valor_Reconhecimento: null },
+      { ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: undefined as unknown as null },
+    ]
+    const totals = recognitionTotals(order, recos)
+    expect(totals.totalReconhecido).toBe(0)
+  })
+
+  it('handles empty recognition list', () => {
+    const totals = recognitionTotals(order, [])
+    expect(totals.instrumentReconhecido).toBe(0)
+    expect(totals.instrumentPorReconhecer).toBe(47_045) // 48_500 − 1_455
+    expect(totals.warrantyReconhecido).toBe(0)
+    expect(totals.warrantyPorReconhecer).toBe(1_455)
+    expect(totals.totalReconhecido).toBe(0)
+  })
+
+  it('ignores a stale reserve when the order type has no warranty', () => {
+    const nonWarrantyOrder = {
+      Sell_Price: 12_000,
+      Warranty_Reserve: 2_000,
+      Tipo_Warranty: false,
+    }
+    const totals = recognitionTotals(nonWarrantyOrder, [
+      { ID_Tp_Reconhecimento: 'CM', Valor_Reconhecimento: 12_000 },
+    ])
+
+    expect(totals.instrumentReconhecido).toBe(12_000)
+    expect(totals.instrumentPorReconhecer).toBe(0)
+    expect(totals.warrantyPorReconhecer).toBe(0)
+  })
+
+  it('degrades to 0 capacity when Sell_Price/Warranty_Reserve are null', () => {
+    const totals = recognitionTotals({ Sell_Price: null, Warranty_Reserve: null }, [])
+    expect(totals.instrumentPorReconhecer).toBe(0)
+    expect(totals.warrantyPorReconhecer).toBe(0)
+  })
+})
+
+describe('reconhecimentoEstado', () => {
+  it('returns "reconhecido" for a past date', () => {
+    expect(reconhecimentoEstado({ DT_Reconhecimento: '2025-01-01' }, new Date('2025-08-25'))).toBe(
+      'reconhecido',
+    )
+  })
+
+  it('returns "reconhecido" for today (UTC day compare)', () => {
+    expect(reconhecimentoEstado({ DT_Reconhecimento: '2025-08-25' }, new Date('2025-08-25'))).toBe(
+      'reconhecido',
+    )
+  })
+
+  it('returns "por-reconhecer" for a future date', () => {
+    expect(reconhecimentoEstado({ DT_Reconhecimento: '2025-12-31' }, new Date('2025-08-25'))).toBe(
+      'por-reconhecer',
+    )
+  })
+
+  it('returns "por-reconhecer" when the date is null', () => {
+    expect(reconhecimentoEstado({ DT_Reconhecimento: null }, new Date('2025-08-25'))).toBe(
+      'por-reconhecer',
+    )
+  })
+
+  it('returns "por-reconhecer" for an unparseable date', () => {
+    expect(reconhecimentoEstado({ DT_Reconhecimento: 'not-a-date' }, new Date('2025-08-25'))).toBe(
+      'por-reconhecer',
+    )
   })
 })

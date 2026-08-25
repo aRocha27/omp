@@ -1,13 +1,16 @@
 import type { Response } from 'express'
 import { ZodError } from 'zod'
 import type { ConnectionPool } from 'mssql'
-import { RecognitionCapacityError, TableUnavailableError } from '../db.js'
+import {
+  DatabaseRowNotFoundError,
+  FacturacaoCapacityError,
+  PropagationValidationError,
+  RecognitionCapacityError,
+  TableUnavailableError,
+} from '../db.js'
 import { toConnectError } from '../errors.js'
 import { logger } from '../logger.js'
-import {
-  OrdersProfileNotConfiguredError,
-  ProfileConfigurationError,
-} from '../profiles.js'
+import { OrdersProfileNotConfiguredError, ProfileConfigurationError } from '../profiles.js'
 import type { ApiErrorCode, ConnectionConfig, Err } from '../types.js'
 
 // Thrown when ad-hoc credentials reach a server that has disabled them. Lives here so both
@@ -67,8 +70,18 @@ export function sendError(response: Response, error: unknown): void {
     return
   }
 
-  if (error instanceof RecognitionCapacityError) {
+  if (error instanceof RecognitionCapacityError || error instanceof FacturacaoCapacityError) {
+    response.status(422).json({ ok: false, code: 'capacity-exceeded', message: error.message })
+    return
+  }
+
+  if (error instanceof PropagationValidationError) {
     response.status(422).json({ ok: false, code: 'validation', message: error.message })
+    return
+  }
+
+  if (error instanceof DatabaseRowNotFoundError) {
+    response.status(404).json({ ok: false, code: 'not-found', message: error.message })
     return
   }
 

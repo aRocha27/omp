@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { connectBodySchema, syncBodySchema } from './validation.js'
+import {
+  connectBodySchema,
+  facturacaoDeleteBodySchema,
+  facturacaoUpdateBodySchema,
+  reconhecimentoDeleteBodySchema,
+  reconhecimentoPropagateBodySchema,
+  reconhecimentoUpdateBodySchema,
+  syncBodySchema,
+} from './validation.js'
 
 const credentials = {
   server: 'sql-orders.internal',
@@ -60,5 +68,102 @@ describe('connection request validation', () => {
         table: 'Orders',
       }).success,
     ).toBe(false)
+  })
+})
+
+describe('order sub-table mutation validation', () => {
+  it('accepts a partial recognition update and strips unknown patch keys', () => {
+    expect(
+      reconhecimentoUpdateBodySchema.parse({
+        id: 7,
+        patch: {
+          ID_Tp_Reconhecimento: 'WP',
+          DT_Reconhecimento: '2027-01-01T00:00:00Z',
+          Valor_Reconhecimento: 125.5,
+          ID_Order: 999,
+        },
+      }),
+    ).toEqual({
+      id: 7,
+      patch: {
+        ID_Tp_Reconhecimento: 'WP',
+        DT_Reconhecimento: '2027-01-01T00:00:00Z',
+        Valor_Reconhecimento: 125.5,
+      },
+    })
+  })
+
+  it('rejects invalid recognition update and delete identifiers', () => {
+    expect(
+      reconhecimentoUpdateBodySchema.safeParse({
+        id: 0,
+        patch: { Valor_Reconhecimento: -1 },
+      }).success,
+    ).toBe(false)
+    expect(reconhecimentoDeleteBodySchema.safeParse({ id: -1 }).success).toBe(false)
+  })
+
+  it('requires maintenance propagation inputs but not warranty inputs', () => {
+    expect(reconhecimentoPropagateBodySchema.parse({ orderId: 101, kind: 'warranty' })).toEqual({
+      orderId: 101,
+      kind: 'warranty',
+    })
+
+    expect(
+      reconhecimentoPropagateBodySchema.safeParse({ orderId: 101, kind: 'maintenance' }).success,
+    ).toBe(false)
+    expect(
+      reconhecimentoPropagateBodySchema.parse({
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 3,
+      }),
+    ).toEqual({
+      orderId: 101,
+      kind: 'maintenance',
+      startDate: '2027-02-18',
+      years: 3,
+    })
+    expect(
+      reconhecimentoPropagateBodySchema.safeParse({
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 1.5,
+      }).success,
+    ).toBe(false)
+    expect(
+      reconhecimentoPropagateBodySchema.safeParse({
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 101,
+      }).success,
+    ).toBe(false)
+  })
+
+  it('accepts editable invoicing fields and rejects invalid deletes', () => {
+    expect(
+      facturacaoUpdateBodySchema.parse({
+        id: 3,
+        patch: {
+          DT_Doc_FT: '2026-09-01',
+          ID_Tp_Doc_FT: 'NC',
+          N_Doc_FT: 'NC 1',
+          Valor_Doc_FT: -100,
+          ID_Order: 999,
+        },
+      }),
+    ).toEqual({
+      id: 3,
+      patch: {
+        DT_Doc_FT: '2026-09-01',
+        ID_Tp_Doc_FT: 'NC',
+        N_Doc_FT: 'NC 1',
+        Valor_Doc_FT: -100,
+      },
+    })
+    expect(facturacaoDeleteBodySchema.safeParse({ id: 0 }).success).toBe(false)
   })
 })

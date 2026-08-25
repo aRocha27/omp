@@ -31,6 +31,7 @@ const summaryRow: OrderSummaryRow = {
 
 const detailRow: OrderDetailRow = {
   ...summaryRow,
+  Tipo_Warranty: true,
   Orc_Proposta: 'PROP-12000',
   PO_Cliente: 'PO-1',
   ID_Tp_Warranty: 2,
@@ -87,8 +88,14 @@ function dependencies(overrides: Partial<AppDependencies> = {}) {
     createOrder: vi.fn(async () => detailRow),
     fetchReconhecimentos: vi.fn(async () => []),
     fetchFacturacao: vi.fn(async () => []),
+    fetchFacturacaoTypes: vi.fn(async () => []),
     addReconhecimento: vi.fn(async () => null as never),
+    updateReconhecimento: vi.fn(async () => null),
+    deleteReconhecimento: vi.fn(async () => false),
+    propagateReconhecimento: vi.fn(async () => []),
     addFacturacao: vi.fn(async () => null as never),
+    updateFacturacao: vi.fn(async () => null),
+    deleteFacturacao: vi.fn(async () => false),
     fetchClientSummaries: vi.fn(async () => []),
     fetchClientById: vi.fn(async () => null),
     close,

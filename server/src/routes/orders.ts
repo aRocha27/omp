@@ -3,6 +3,7 @@ import type { ConnectionPool } from 'mssql'
 import type {
   ConnectionConfig,
   DocumentoFaturacaoRow,
+  DocumentoFaturacaoTypeRow,
   OkFacturacao,
   OkOrder,
   OkOrders,
@@ -16,12 +17,11 @@ import type {
   ReconhecimentoRow,
   NewReconhecimentoInput,
   NewFacturacaoInput,
+  ReconhecimentoPatch,
+  FacturacaoPatch,
+  PropagateReconhecimentoInput,
 } from '../types.js'
-import {
-  isHistoricoRow,
-  isLockedCaracterizacaoField,
-  type OrderListFilters,
-} from '../db.js'
+import { isHistoricoRow, isLockedCaracterizacaoField, type OrderListFilters } from '../db.js'
 import {
   orderIdQueryParamSchema,
   ordersListBodySchema,
@@ -29,7 +29,12 @@ import {
   orderCreateBodySchema,
   orderUpdateBodySchema,
   reconhecimentoCreateBodySchema,
+  reconhecimentoDeleteBodySchema,
+  reconhecimentoPropagateBodySchema,
+  reconhecimentoUpdateBodySchema,
   facturacaoCreateBodySchema,
+  facturacaoDeleteBodySchema,
+  facturacaoUpdateBodySchema,
 } from '../validation.js'
 import { RouteError, sendError, withPool } from './http-errors.js'
 
@@ -49,30 +54,72 @@ export interface OrdersDependencies {
     id: number,
     changes: OrderUpdateChanges,
   ) => Promise<OrderDetailRow | null>
-  createOrder: (pool: ConnectionPool, input: OrderCreateInput, user: string) => Promise<OrderDetailRow>
+  createOrder: (
+    pool: ConnectionPool,
+    input: OrderCreateInput,
+    user: string,
+  ) => Promise<OrderDetailRow>
   fetchReconhecimentos: (pool: ConnectionPool, orderId: number) => Promise<ReconhecimentoRow[]>
   fetchFacturacao: (pool: ConnectionPool, orderId: number) => Promise<DocumentoFaturacaoRow[]>
-  addReconhecimento: (pool: ConnectionPool, input: NewReconhecimentoInput, user: string) => Promise<ReconhecimentoRow>
-  addFacturacao: (pool: ConnectionPool, input: NewFacturacaoInput, user: string) => Promise<DocumentoFaturacaoRow>
+  fetchFacturacaoTypes: (pool: ConnectionPool) => Promise<DocumentoFaturacaoTypeRow[]>
+  addReconhecimento: (
+    pool: ConnectionPool,
+    input: NewReconhecimentoInput,
+    user: string,
+  ) => Promise<ReconhecimentoRow>
+  updateReconhecimento: (
+    pool: ConnectionPool,
+    id: number,
+    patch: ReconhecimentoPatch,
+    user: string,
+  ) => Promise<ReconhecimentoRow | null>
+  deleteReconhecimento: (pool: ConnectionPool, id: number) => Promise<boolean>
+  propagateReconhecimento: (
+    pool: ConnectionPool,
+    input: PropagateReconhecimentoInput,
+    user: string,
+  ) => Promise<ReconhecimentoRow[]>
+  addFacturacao: (
+    pool: ConnectionPool,
+    input: NewFacturacaoInput,
+    user: string,
+  ) => Promise<DocumentoFaturacaoRow>
+  updateFacturacao: (
+    pool: ConnectionPool,
+    id: number,
+    patch: FacturacaoPatch,
+    user: string,
+  ) => Promise<DocumentoFaturacaoRow | null>
+  deleteFacturacao: (pool: ConnectionPool, id: number) => Promise<boolean>
 }
 
 type UserRole = 'viewer' | 'editor' | 'admin'
 
-// DEV-ONLY role probe. The x-user-role header is trivially spoofable by any client that
-// can reach the API, so this is NOT authentication. It is acceptable solely because
-// auth.ts boot-guards tokenless mode to loopback (HOST must be 127.0.0.1/::1/localhost when
-// ADMIN_API_TOKEN is unset), so a spoofable header can never be reached over the network in
-// dev. In any non-loopback deployment ADMIN_API_TOKEN is required and the Orders endpoint
-// has no token in its contract yet — that auth gap is the follow-up tracked as R-A. Real
-// per-user authorization (session/JWT bound to a role) must replace this before the Orders
-// update path ships to a non-loopback host.
-function readUserRole(header: string | string[] | undefined): UserRole {
-  const value = typeof header === 'string' ? header.trim().toLowerCase() : ''
-  if (value === 'viewer' || value === 'admin') return value
-  return 'editor'
+export interface OrdersAuthorization {
+  /** A successful request already passed configured bearer-token authentication. */
+  authenticatedAdmin: boolean
 }
 
-export function createOrdersRouter(dependencies: OrdersDependencies): Router {
+function readUserRole(
+  authorization: OrdersAuthorization,
+  header: string | string[] | undefined,
+): UserRole {
+  // A configured ADMIN_API_TOKEN is the authority. Never let a caller downgrade or
+  // impersonate a different role through the development-only header.
+  if (authorization.authenticatedAdmin) return 'admin'
+
+  // Tokenless mode is boot-guarded to loopback. It may simulate roles explicitly,
+  // but missing and unrecognised values fail closed as viewer.
+  const value = typeof header === 'string' ? header.trim().toLowerCase() : ''
+  if (value === 'user' || value === 'editor') return 'editor'
+  if (value === 'viewer' || value === 'admin') return value
+  return 'viewer'
+}
+
+export function createOrdersRouter(
+  dependencies: OrdersDependencies,
+  authorization: OrdersAuthorization,
+): Router {
   const router = Router()
 
   router.post('/api/orders/list', async (request: Request, response: Response) => {
@@ -108,7 +155,10 @@ export function createOrdersRouter(dependencies: OrdersDependencies): Router {
   router.post('/api/orders/update', async (request: Request, response: Response) => {
     try {
       const body = orderUpdateBodySchema.parse(request.body)
-      const role = readUserRole(request.headers['x-user-role'])
+      const role = readUserRole(authorization, request.headers['x-user-role'])
+      if (role === 'viewer') {
+        throw new RouteError('forbidden', 403, 'Viewers may not update orders.')
+      }
       const connection = dependencies.resolveOrdersProfile()
 
       const current = await withPool(dependencies.openPool, connection, (pool) =>
@@ -119,12 +169,9 @@ export function createOrdersRouter(dependencies: OrdersDependencies): Router {
       }
 
       // Defense in depth: the "bloqueio de caracterização após fecho do mês" rule is
-      // enforced server-side, not just in the UI. Viewer never updates. Non-admin editors
-      // cannot touch locked Caracterização fields on a histórico (past-month, non-provisional)
-      // order. Admins override; provisional orders are always editable.
-      if (role === 'viewer') {
-        throw new RouteError('forbidden', 403, 'Viewers may not update orders.')
-      }
+      // enforced server-side, not just in the UI. Non-admin editors cannot touch locked
+      // Caracterização fields on a histórico (past-month, non-provisional) order. Admins
+      // override; provisional orders are always editable.
       if (role !== 'admin' && isHistoricoRow(current)) {
         const locked = Object.keys(body.patch).filter(isLockedCaracterizacaoField)
         if (locked.length > 0) {
@@ -158,8 +205,9 @@ export function createOrdersRouter(dependencies: OrdersDependencies): Router {
   router.post('/api/orders', async (request: Request, response: Response) => {
     try {
       const body = orderCreateBodySchema.parse(request.body) as OrderCreateInput
-      const role = readUserRole(request.headers['x-user-role'])
-      if (role === 'viewer') throw new RouteError('forbidden', 403, 'Viewers may not create orders.')
+      const role = readUserRole(authorization, request.headers['x-user-role'])
+      if (role === 'viewer')
+        throw new RouteError('forbidden', 403, 'Viewers may not create orders.')
       const connection = dependencies.resolveOrdersProfile()
       const order = await withPool(dependencies.openPool, connection, (pool) =>
         dependencies.createOrder(pool, body, role),
@@ -187,6 +235,18 @@ export function createOrdersRouter(dependencies: OrdersDependencies): Router {
     }
   })
 
+  router.get('/api/orders/facturacao/types', async (_request: Request, response: Response) => {
+    try {
+      const connection = dependencies.resolveOrdersProfile()
+      const types = await withPool(dependencies.openPool, connection, (pool) =>
+        dependencies.fetchFacturacaoTypes(pool),
+      )
+      response.json({ ok: true, types })
+    } catch (error) {
+      sendError(response, error)
+    }
+  })
+
   router.get('/api/orders/facturacao', async (request: Request, response: Response) => {
     try {
       const orderId = orderIdQueryParamSchema.parse(request.query.orderId)
@@ -204,8 +264,9 @@ export function createOrdersRouter(dependencies: OrdersDependencies): Router {
   router.post('/api/orders/reconhecimentos', async (request: Request, response: Response) => {
     try {
       const body = reconhecimentoCreateBodySchema.parse(request.body)
-      const role = readUserRole(request.headers['x-user-role'])
-      if (role === 'viewer') throw new RouteError('forbidden', 403, 'Viewers may not add recognition.')
+      const role = readUserRole(authorization, request.headers['x-user-role'])
+      if (role === 'viewer')
+        throw new RouteError('forbidden', 403, 'Viewers may not add recognition.')
       const connection = dependencies.resolveOrdersProfile()
       const row = await withPool(dependencies.openPool, connection, (pool) =>
         dependencies.addReconhecimento(pool, body, role),
@@ -216,16 +277,122 @@ export function createOrdersRouter(dependencies: OrdersDependencies): Router {
     }
   })
 
+  router.post(
+    '/api/orders/reconhecimentos/update',
+    async (request: Request, response: Response) => {
+      try {
+        const body = reconhecimentoUpdateBodySchema.parse(request.body)
+        const role = readUserRole(authorization, request.headers['x-user-role'])
+        if (role === 'viewer') {
+          throw new RouteError('forbidden', 403, 'Viewers may not update recognition.')
+        }
+        const connection = dependencies.resolveOrdersProfile()
+        const row = await withPool(dependencies.openPool, connection, (pool) =>
+          dependencies.updateReconhecimento(pool, body.id, body.patch, role),
+        )
+        if (!row) {
+          throw new RouteError('not-found', 404, `Recognition ${body.id} was not found.`)
+        }
+        response.json({ ok: true, row })
+      } catch (error) {
+        sendError(response, error)
+      }
+    },
+  )
+
+  router.post(
+    '/api/orders/reconhecimentos/delete',
+    async (request: Request, response: Response) => {
+      try {
+        const body = reconhecimentoDeleteBodySchema.parse(request.body)
+        const role = readUserRole(authorization, request.headers['x-user-role'])
+        if (role === 'viewer') {
+          throw new RouteError('forbidden', 403, 'Viewers may not delete recognition.')
+        }
+        const connection = dependencies.resolveOrdersProfile()
+        const deleted = await withPool(dependencies.openPool, connection, (pool) =>
+          dependencies.deleteReconhecimento(pool, body.id),
+        )
+        if (!deleted) {
+          throw new RouteError('not-found', 404, `Recognition ${body.id} was not found.`)
+        }
+        response.json({ ok: true })
+      } catch (error) {
+        sendError(response, error)
+      }
+    },
+  )
+
+  router.post(
+    '/api/orders/reconhecimentos/propagate',
+    async (request: Request, response: Response) => {
+      try {
+        const body = reconhecimentoPropagateBodySchema.parse(request.body)
+        const role = readUserRole(authorization, request.headers['x-user-role'])
+        if (role === 'viewer') {
+          throw new RouteError('forbidden', 403, 'Viewers may not propagate recognition.')
+        }
+        const connection = dependencies.resolveOrdersProfile()
+        const rows = await withPool(dependencies.openPool, connection, (pool) =>
+          dependencies.propagateReconhecimento(pool, body, role),
+        )
+        response.status(201).json({ ok: true, rows })
+      } catch (error) {
+        sendError(response, error)
+      }
+    },
+  )
+
   router.post('/api/orders/facturacao', async (request: Request, response: Response) => {
     try {
       const body = facturacaoCreateBodySchema.parse(request.body)
-      const role = readUserRole(request.headers['x-user-role'])
+      const role = readUserRole(authorization, request.headers['x-user-role'])
       if (role === 'viewer') throw new RouteError('forbidden', 403, 'Viewers may not add invoices.')
       const connection = dependencies.resolveOrdersProfile()
       const row = await withPool(dependencies.openPool, connection, (pool) =>
         dependencies.addFacturacao(pool, body, role),
       )
       response.status(201).json({ ok: true, row })
+    } catch (error) {
+      sendError(response, error)
+    }
+  })
+
+  router.post('/api/orders/facturacao/update', async (request: Request, response: Response) => {
+    try {
+      const body = facturacaoUpdateBodySchema.parse(request.body)
+      const role = readUserRole(authorization, request.headers['x-user-role'])
+      if (role === 'viewer') {
+        throw new RouteError('forbidden', 403, 'Viewers may not update invoices.')
+      }
+      const connection = dependencies.resolveOrdersProfile()
+      const row = await withPool(dependencies.openPool, connection, (pool) =>
+        dependencies.updateFacturacao(pool, body.id, body.patch, role),
+      )
+      if (!row) {
+        throw new RouteError('not-found', 404, `Invoice ${body.id} was not found.`)
+      }
+      response.json({ ok: true, row })
+    } catch (error) {
+      sendError(response, error)
+    }
+  })
+
+  router.post('/api/orders/facturacao/delete', async (request: Request, response: Response) => {
+    try {
+      const body = facturacaoDeleteBodySchema.parse(request.body)
+      const role = readUserRole(authorization, request.headers['x-user-role'])
+      if (role === 'viewer') {
+        throw new RouteError('forbidden', 403, 'Viewers may not delete invoices.')
+      }
+      const connection = dependencies.resolveOrdersProfile()
+      const deleted = await withPool(dependencies.openPool, connection, (pool) =>
+        dependencies.deleteFacturacao(pool, body.id),
+      )
+      if (!deleted) {
+        throw new RouteError('not-found', 404, `Invoice ${body.id} was not found.`)
+      }
+      response.json({ ok: true })
     } catch (error) {
       sendError(response, error)
     }

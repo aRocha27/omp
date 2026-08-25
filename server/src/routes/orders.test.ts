@@ -2,10 +2,12 @@ import request from 'supertest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ConnectionPool } from 'mssql'
 import { createApp, type AppDependencies } from '../app.js'
+import { RecognitionCapacityError } from '../db.js'
 import { OrdersProfileNotConfiguredError } from '../profiles.js'
 import type {
   ConnectionConfig,
   DocumentoFaturacaoRow,
+  DocumentoFaturacaoTypeRow,
   OrderDetailRow,
   OrderSummaryRow,
   ReconhecimentoRow,
@@ -38,6 +40,7 @@ const summaryRow: OrderSummaryRow = {
 
 const detailRow: OrderDetailRow = {
   ...summaryRow,
+  Tipo_Warranty: true,
   Orc_Proposta: 'PROP-12000',
   PO_Cliente: 'PO-1',
   ID_Tp_Warranty: 2,
@@ -83,6 +86,12 @@ const reconhecimentoRows: ReconhecimentoRow[] = [
   },
 ]
 
+const documentTypes: DocumentoFaturacaoTypeRow[] = [
+  { id: 'AcFT', label: 'Acerto Factura' },
+  { id: 'FT', label: 'Factura' },
+  { id: 'NC', label: 'Nota Crédito' },
+]
+
 const facturacaoRows: DocumentoFaturacaoRow[] = [
   {
     ID_Facturacao: 1,
@@ -117,8 +126,14 @@ function ordersDependencies(overrides: Partial<AppDependencies> = {}) {
     createOrder: vi.fn(async () => detailRow),
     fetchReconhecimentos: vi.fn(async () => []),
     fetchFacturacao: vi.fn(async () => []),
+    fetchFacturacaoTypes: vi.fn(async () => documentTypes),
     addReconhecimento: vi.fn(async () => reconhecimentoRows[0]),
+    updateReconhecimento: vi.fn(async () => reconhecimentoRows[0]),
+    deleteReconhecimento: vi.fn(async () => true),
+    propagateReconhecimento: vi.fn(async () => reconhecimentoRows),
     addFacturacao: vi.fn(async () => facturacaoRows[0]),
+    updateFacturacao: vi.fn(async () => facturacaoRows[0]),
+    deleteFacturacao: vi.fn(async () => true),
     fetchClientSummaries: vi.fn(async () => []),
     fetchClientById: vi.fn(async () => null),
     close,
@@ -157,9 +172,7 @@ describe('Orders API', () => {
   it('forwards filters and a custom limit to the repository', async () => {
     const deps = ordersDependencies()
     const filters = { idArea: ['BDAL'], idProduto: [2], negocioFechado: true }
-    const response = await ordersApi(deps)
-      .post('/api/orders/list')
-      .send({ filters, limit: 50 })
+    const response = await ordersApi(deps).post('/api/orders/list').send({ filters, limit: 50 })
 
     expect(response.status).toBe(200)
     expect(deps.fetchOrderSummaries).toHaveBeenCalledWith(expect.anything(), filters, 50)
@@ -285,23 +298,56 @@ describe('Orders API', () => {
 describe('Orders update endpoint', () => {
   it('updates a current-month order as editor and returns the updated row', async () => {
     const deps = ordersDependencies()
-    const response = await ordersApi(deps)
+    const response = await ordersApi(deps, null)
       .post('/api/orders/update')
+      .set('x-user-role', 'user')
       .send({ id: 101, patch: { Obs: 'Revised note' } })
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ ok: true, order: detailRow })
     expect(deps.fetchOrderById).toHaveBeenCalledWith(expect.anything(), 101)
-    // The route falls back to the dev role ('editor') when no user is supplied.
+    // Tokenless loopback mode honours an explicitly simulated editor role.
     expect(deps.updateOrder).toHaveBeenCalledWith(expect.anything(), 101, {
       Obs: 'Revised note',
       user: 'editor',
     })
   })
 
+  it('fails closed for missing or unknown roles in loopback tokenless mode', async () => {
+    const deps = ordersDependencies()
+    const missing = await ordersApi(deps, null)
+      .post('/api/orders/update')
+      .send({ id: 101, patch: { Obs: 'x' } })
+    const unknown = await ordersApi(deps, null)
+      .post('/api/orders/update')
+      .set('x-user-role', 'owner')
+      .send({ id: 101, patch: { Obs: 'x' } })
+
+    expect([missing.status, unknown.status]).toEqual([403, 403])
+    expect(deps.fetchOrderById).not.toHaveBeenCalled()
+    expect(deps.updateOrder).not.toHaveBeenCalled()
+    expect(deps.openPool).not.toHaveBeenCalled()
+  })
+
+  it('binds a configured admin token to admin authority and ignores a spoofed role header', async () => {
+    const deps = ordersDependencies({
+      fetchOrderById: vi.fn(async () => historicoDetailRow),
+    })
+    const response = await ordersApi(deps)
+      .post('/api/orders/update')
+      .set('x-user-role', 'viewer')
+      .send({ id: 202, patch: { Sell_Price: 9999 } })
+
+    expect(response.status).toBe(200)
+    expect(deps.updateOrder).toHaveBeenCalledWith(expect.anything(), 202, {
+      Sell_Price: 9999,
+      user: 'admin',
+    })
+  })
+
   it('rejects a viewer with 403 forbidden', async () => {
     const deps = ordersDependencies()
-    const response = await ordersApi(deps)
+    const response = await ordersApi(deps, null)
       .post('/api/orders/update')
       .set('x-user-role', 'viewer')
       .send({ id: 101, patch: { Obs: 'x' } })
@@ -315,9 +361,10 @@ describe('Orders update endpoint', () => {
     const deps = ordersDependencies({
       fetchOrderById: vi.fn(async () => historicoDetailRow),
     })
-    const response = await ordersApi(deps)
+    const response = await ordersApi(deps, null)
       .post('/api/orders/update')
-       .send({ id: 202, patch: { ID_Area: 'NEW' } })
+      .set('x-user-role', 'editor')
+      .send({ id: 202, patch: { ID_Area: 'NEW' } })
 
     expect(response.status).toBe(403)
     expect(response.body).toMatchObject({ ok: false, code: 'field-locked' })
@@ -327,7 +374,10 @@ describe('Orders update endpoint', () => {
 
   it('allows an editor to update Revenue on a histórico order', async () => {
     const deps = ordersDependencies({ fetchOrderById: vi.fn(async () => historicoDetailRow) })
-    const response = await ordersApi(deps).post('/api/orders/update').send({ id: 202, patch: { ID_Tp_Revenue: 2 } })
+    const response = await ordersApi(deps, null)
+      .post('/api/orders/update')
+      .set('x-user-role', 'editor')
+      .send({ id: 202, patch: { ID_Tp_Revenue: 2 } })
     expect(response.status).toBe(200)
     expect(deps.updateOrder).toHaveBeenCalled()
   })
@@ -336,8 +386,9 @@ describe('Orders update endpoint', () => {
     const deps = ordersDependencies({
       fetchOrderById: vi.fn(async () => historicoDetailRow),
     })
-    const response = await ordersApi(deps)
+    const response = await ordersApi(deps, null)
       .post('/api/orders/update')
+      .set('x-user-role', 'editor')
       .send({ id: 202, patch: { Obs: 'late note' } })
 
     expect(response.status).toBe(200)
@@ -352,7 +403,7 @@ describe('Orders update endpoint', () => {
     const deps = ordersDependencies({
       fetchOrderById: vi.fn(async () => historicoDetailRow),
     })
-    const response = await ordersApi(deps)
+    const response = await ordersApi(deps, null)
       .post('/api/orders/update')
       .set('x-user-role', 'admin')
       .send({ id: 202, patch: { Sell_Price: 9999 } })
@@ -368,8 +419,9 @@ describe('Orders update endpoint', () => {
     const deps = ordersDependencies({
       fetchOrderById: vi.fn(async () => provisoriaDetailRow),
     })
-    const response = await ordersApi(deps)
+    const response = await ordersApi(deps, null)
       .post('/api/orders/update')
+      .set('x-user-role', 'editor')
       .send({ id: 303, patch: { Sell_Price: 9999 } })
 
     expect(response.status).toBe(200)
@@ -394,8 +446,9 @@ describe('Orders update endpoint', () => {
 
   it('strips unknown patch keys before they reach the db layer', async () => {
     const deps = ordersDependencies()
-    const response = await ordersApi(deps)
+    const response = await ordersApi(deps, null)
       .post('/api/orders/update')
+      .set('x-user-role', 'editor')
       .send({ id: 101, patch: { NotARealColumn: 'x' } })
 
     // zod strips unknown keys, so the request succeeds with an empty patch and the
@@ -408,9 +461,7 @@ describe('Orders update endpoint', () => {
 
   it('rejects a non-positive id as validation', async () => {
     const deps = ordersDependencies()
-    const response = await ordersApi(deps)
-      .post('/api/orders/update')
-      .send({ id: 0, patch: {} })
+    const response = await ordersApi(deps).post('/api/orders/update').send({ id: 0, patch: {} })
 
     expect(response.status).toBe(400)
     expect(response.body).toMatchObject({ ok: false, code: 'validation' })
@@ -460,6 +511,15 @@ describe('Orders sub-table reads', () => {
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ ok: true, rows: facturacaoRows })
     expect(deps.fetchFacturacao).toHaveBeenCalledWith(expect.anything(), 101)
+  })
+
+  it('returns live Tp_Doc_FT options with descriptive labels', async () => {
+    const deps = ordersDependencies()
+    const response = await ordersApi(deps).get('/api/orders/facturacao/types')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: true, types: documentTypes })
+    expect(deps.fetchFacturacaoTypes).toHaveBeenCalledWith(expect.anything())
   })
 
   it('returns an empty facturacao array for an unknown orderId', async () => {
@@ -517,5 +577,147 @@ describe('Orders sub-table reads', () => {
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ ok: true, rows: facturacaoRows })
+  })
+})
+
+describe('Orders sub-table mutations', () => {
+  it('updates a recognition row and stamps the acting role server-side', async () => {
+    const deps = ordersDependencies()
+    const patch = {
+      ID_Tp_Reconhecimento: 'WP',
+      DT_Reconhecimento: '2027-01-01T00:00:00Z',
+      Valor_Reconhecimento: 500,
+    }
+    const response = await ordersApi(deps)
+      .post('/api/orders/reconhecimentos/update')
+      .set('x-user-role', 'admin')
+      .send({ id: 1, patch })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: true, row: reconhecimentoRows[0] })
+    expect(deps.updateReconhecimento).toHaveBeenCalledWith(expect.anything(), 1, patch, 'admin')
+  })
+
+  it('hard-deletes a recognition row and returns 404 when it does not exist', async () => {
+    const found = ordersDependencies()
+    const deleted = await ordersApi(found)
+      .post('/api/orders/reconhecimentos/delete')
+      .send({ id: 1 })
+
+    expect(deleted.status).toBe(200)
+    expect(deleted.body).toEqual({ ok: true })
+    expect(found.deleteReconhecimento).toHaveBeenCalledWith(expect.anything(), 1)
+
+    const missing = ordersDependencies({ deleteReconhecimento: vi.fn(async () => false) })
+    const notFound = await ordersApi(missing)
+      .post('/api/orders/reconhecimentos/delete')
+      .send({ id: 999 })
+    expect(notFound.status).toBe(404)
+    expect(notFound.body).toMatchObject({ ok: false, code: 'not-found' })
+  })
+
+  it('propagates maintenance inputs and returns all generated rows', async () => {
+    const deps = ordersDependencies()
+    const response = await ordersApi(deps, null)
+      .post('/api/orders/reconhecimentos/propagate')
+      .set('x-user-role', 'editor')
+      .send({
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 2,
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual({ ok: true, rows: reconhecimentoRows })
+    expect(deps.propagateReconhecimento).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 2,
+      },
+      'editor',
+    )
+  })
+
+  it('rejects viewers for every recognition mutation before opening a pool', async () => {
+    const deps = ordersDependencies()
+    const update = await ordersApi(deps, null)
+      .post('/api/orders/reconhecimentos/update')
+      .set('x-user-role', 'viewer')
+      .send({ id: 1, patch: { Valor_Reconhecimento: 1 } })
+    const remove = await ordersApi(deps, null)
+      .post('/api/orders/reconhecimentos/delete')
+      .set('x-user-role', 'viewer')
+      .send({ id: 1 })
+    const propagate = await ordersApi(deps, null)
+      .post('/api/orders/reconhecimentos/propagate')
+      .set('x-user-role', 'viewer')
+      .send({ orderId: 101, kind: 'warranty' })
+
+    expect([update.status, remove.status, propagate.status]).toEqual([403, 403, 403])
+    expect(deps.updateReconhecimento).not.toHaveBeenCalled()
+    expect(deps.deleteReconhecimento).not.toHaveBeenCalled()
+    expect(deps.propagateReconhecimento).not.toHaveBeenCalled()
+    expect(deps.openPool).not.toHaveBeenCalled()
+  })
+
+  it('returns a stable 422 capacity error without hiding the business message', async () => {
+    const deps = ordersDependencies({
+      updateReconhecimento: vi.fn(async () => {
+        throw new RecognitionCapacityError('O total reconhecido não pode ultrapassar o Sell Price.')
+      }),
+    })
+    const response = await ordersApi(deps)
+      .post('/api/orders/reconhecimentos/update')
+      .send({ id: 1, patch: { Valor_Reconhecimento: 999999 } })
+
+    expect(response.status).toBe(422)
+    expect(response.body).toEqual({
+      ok: false,
+      code: 'capacity-exceeded',
+      message: 'O total reconhecido não pode ultrapassar o Sell Price.',
+    })
+  })
+
+  it('updates and deletes invoicing documents', async () => {
+    const deps = ordersDependencies()
+    const patch = {
+      ID_Tp_Doc_FT: 'NC',
+      N_Doc_FT: 'NC 2027/1',
+      Valor_Doc_FT: -100,
+    }
+    const updated = await ordersApi(deps, null)
+      .post('/api/orders/facturacao/update')
+      .set('x-user-role', 'editor')
+      .send({ id: 1, patch })
+    const deleted = await ordersApi(deps, null)
+      .post('/api/orders/facturacao/delete')
+      .set('x-user-role', 'editor')
+      .send({ id: 1 })
+
+    expect(updated.status).toBe(200)
+    expect(updated.body).toEqual({ ok: true, row: facturacaoRows[0] })
+    expect(deps.updateFacturacao).toHaveBeenCalledWith(expect.anything(), 1, patch, 'editor')
+    expect(deleted.status).toBe(200)
+    expect(deps.deleteFacturacao).toHaveBeenCalledWith(expect.anything(), 1)
+  })
+
+  it('rejects viewers for invoicing mutations', async () => {
+    const deps = ordersDependencies()
+    const updated = await ordersApi(deps, null)
+      .post('/api/orders/facturacao/update')
+      .set('x-user-role', 'viewer')
+      .send({ id: 1, patch: { Valor_Doc_FT: 1 } })
+    const deleted = await ordersApi(deps, null)
+      .post('/api/orders/facturacao/delete')
+      .set('x-user-role', 'viewer')
+      .send({ id: 1 })
+
+    expect([updated.status, deleted.status]).toEqual([403, 403])
+    expect(deps.updateFacturacao).not.toHaveBeenCalled()
+    expect(deps.deleteFacturacao).not.toHaveBeenCalled()
   })
 })

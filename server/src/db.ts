@@ -6,6 +6,7 @@ import type {
   ClientSummaryRow,
   ConnectionConfig,
   DocumentoFaturacaoRow,
+  DocumentoFaturacaoTypeRow,
   OrderDetailRow,
   OrderCreateInput,
   OrderSummaryRow,
@@ -13,6 +14,9 @@ import type {
   ReconhecimentoRow,
   NewReconhecimentoInput,
   NewFacturacaoInput,
+  ReconhecimentoPatch,
+  FacturacaoPatch,
+  PropagateReconhecimentoInput,
   UtilizadorRow,
   TableInfo,
   TableRows,
@@ -40,6 +44,27 @@ const ORDERS_TABLE = 'Order'
 const CLIENT_TABLE = 'Client'
 const RECONHECIMENTO_TABLE = 'Reconhecimento'
 const FACTURACAO_TABLE = 'Facturacao'
+const MONEY_EPSILON = 0.00005
+const PROPAGATION_CHUNK_SIZE = 500
+
+const RECONHECIMENTO_UPDATEABLE_COLUMNS: ReadonlyArray<{
+  column: keyof ReconhecimentoPatch
+  type: ISqlType | (() => ISqlType)
+}> = [
+  { column: 'ID_Tp_Reconhecimento', type: mssql.NVarChar },
+  { column: 'DT_Reconhecimento', type: mssql.DateTime },
+  { column: 'Valor_Reconhecimento', type: mssql.Money },
+]
+
+const FACTURACAO_UPDATEABLE_COLUMNS: ReadonlyArray<{
+  column: keyof FacturacaoPatch
+  type: ISqlType | (() => ISqlType)
+}> = [
+  { column: 'DT_Doc_FT', type: mssql.DateTime },
+  { column: 'ID_Tp_Doc_FT', type: mssql.NVarChar },
+  { column: 'N_Doc_FT', type: mssql.NVarChar },
+  { column: 'Valor_Doc_FT', type: mssql.Money },
+]
 
 // Hardcoded whitelist of dbo.[Order] columns an editor may UPDATE. Column names are
 // constants (never user input), so building the SET clause from this list is safe by
@@ -332,13 +357,15 @@ export async function fetchOrderById(
   // still resolves with Provisoria NULL rather than dropping the whole detail.
   const sql = `SELECT
     o.ID_Order, o.DT_Order, o.Order_Factory, o.ID_Tp_Order, o.ID_Client,
-    c.nome AS Client_Name, o.ID_Area, o.ID_Tipo, o.ID_Produto, o.ID_Instrumento,
+    c.nome AS Client_Name, o.ID_Area, o.ID_Tipo, t.Warranty AS Tipo_Warranty,
+    o.ID_Produto, o.ID_Instrumento,
     o.Orc_Proposta, o.PO_Cliente, o.Sell_Price, o.ID_Tp_Warranty,
     o.Warranty_Reserve, o.Warranty_DT_Inicio, o.ID_Tp_Revenue, o.Facturado,
     o.Reconhecido, o.Cod_Enc_Fornecedor, o.Obs, o.Negocio_Fechado, o.ID_User,
     o.DT_User, o.Kit, o.Kit_Amount, c.contacto AS Contacto, v.Provisoria AS Provisoria
   FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o
   LEFT JOIN [${ORDERS_SCHEMA}].[${CLIENT_TABLE}] AS c ON o.ID_Client = c.ID_Cliente
+  LEFT JOIN [${ORDERS_SCHEMA}].[Tipo] AS t ON o.ID_Tipo = t.ID_Tipo
   LEFT JOIN [${ORDERS_SCHEMA}].[${ORDERS_VIEW}] AS v ON v.ID_Order = o.ID_Order
   WHERE o.ID_Order = @id`
 
@@ -358,6 +385,14 @@ export async function updateOrder(
   id: number,
   changes: OrderUpdateChanges,
 ): Promise<OrderDetailRow | null> {
+  if (
+    'Sell_Price' in changes ||
+    'Warranty_Reserve' in changes ||
+    'ID_Tipo' in changes
+  ) {
+    return updateOrderWithCapacityValidation(pool, id, changes)
+  }
+
   const setClauses: string[] = []
   const request = pool.request()
   request.input('id', mssql.Int, id)
@@ -384,6 +419,53 @@ export async function updateOrder(
   return fetchOrderById(pool, id)
 }
 
+async function updateOrderWithCapacityValidation(
+  pool: ConnectionPool,
+  id: number,
+  changes: OrderUpdateChanges,
+): Promise<OrderDetailRow | null> {
+  const transaction = pool.transaction()
+  await transaction.begin()
+  try {
+    const setClauses: string[] = []
+    const request = transaction.request()
+    request.input('id', mssql.Int, id)
+    request.input('user', mssql.NVarChar, changes.user)
+    for (const { column, type } of UPDATEABLE_COLUMNS) {
+      if (column in changes) {
+        setClauses.push(`${column} = @${column}`)
+        request.input(column, type, (changes as Record<string, unknown>)[column])
+      }
+    }
+    setClauses.push('ID_User = @user')
+    setClauses.push('DT_User = GETUTCDATE()')
+
+    const updated = await request.query(
+      `UPDATE [${ORDERS_SCHEMA}].[${ORDERS_TABLE}]
+       SET ${setClauses.join(', ')}
+       WHERE ID_Order = @id`,
+    )
+    if ((updated.rowsAffected[0] ?? 0) === 0) {
+      await transaction.rollback()
+      return null
+    }
+
+    const order = await lockRecognitionOrder(transaction, id)
+    const recognitionRows = await readRecognitionCapacityRows(transaction, id)
+    assertExistingRecognitionCapacity(order, recognitionRows)
+
+    const invoicingRows = await readInvoicingCapacityRows(transaction, id)
+    assertExistingInvoicingCapacity(order, invoicingRows)
+
+    await transaction.commit()
+  } catch (error) {
+    await transaction.rollback().catch(() => undefined)
+    throw error
+  }
+
+  return fetchOrderById(pool, id)
+}
+
 export async function createOrder(
   pool: ConnectionPool,
   input: OrderCreateInput,
@@ -398,7 +480,13 @@ export async function createOrder(
   const columns: string[] = ['DT_Order', 'ID_Tp_Order', 'ID_Client', 'ID_User', 'DT_User']
   const values: string[] = ['@DT_Order', '@ID_Tp_Order', '@ID_Client', '@user', 'GETUTCDATE()']
   for (const { column, type } of UPDATEABLE_COLUMNS) {
-    if (!(column in input) || column === 'DT_Order' || column === 'ID_Tp_Order' || column === 'ID_Client') continue
+    if (
+      !(column in input) ||
+      column === 'DT_Order' ||
+      column === 'ID_Tp_Order' ||
+      column === 'ID_Client'
+    )
+      continue
     columns.push(column)
     values.push(`@${column}`)
     request.input(column, type, (input as Record<string, unknown>)[column])
@@ -528,10 +616,45 @@ export async function fetchFacturacao(
   return Array.from(result.recordset).map(toFacturacaoRow)
 }
 
+export async function fetchFacturacaoTypes(
+  pool: ConnectionPool,
+): Promise<DocumentoFaturacaoTypeRow[]> {
+  const result = await pool.request().query<Record<string, unknown>>(
+    `SELECT ID_Tp_Doc_FT, Tp_Doc_FT
+     FROM [${ORDERS_SCHEMA}].[Tp_Doc_FT]
+     ORDER BY Tp_Doc_FT ASC, ID_Tp_Doc_FT ASC`,
+  )
+  return result.recordset.map((row) => ({
+    id: stringOrNull(row.ID_Tp_Doc_FT) ?? '',
+    label: stringOrNull(row.Tp_Doc_FT) ?? '',
+  }))
+}
+
 export class RecognitionCapacityError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'RecognitionCapacityError'
+  }
+}
+
+export class FacturacaoCapacityError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'FacturacaoCapacityError'
+  }
+}
+
+export class PropagationValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PropagationValidationError'
+  }
+}
+
+export class DatabaseRowNotFoundError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DatabaseRowNotFoundError'
   }
 }
 
@@ -543,55 +666,194 @@ export async function addReconhecimento(
   const transaction = pool.transaction()
   await transaction.begin()
   try {
-    const orderRequest = transaction.request()
-    orderRequest.input('orderId', mssql.Int, input.ID_Order)
-    const orderResult = await orderRequest.query<Record<string, unknown>>(
-      `SELECT o.Sell_Price, o.Warranty_Reserve
-       FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] o WITH (UPDLOCK, HOLDLOCK)
+    const order = await lockRecognitionOrder(transaction, input.ID_Order)
+    const existingRows = await readRecognitionCapacityRows(transaction, input.ID_Order)
+    assertRecognitionCapacity(
+      order,
+      existingRows,
+      input.ID_Tp_Reconhecimento,
+      input.Valor_Reconhecimento,
+    )
+
+    const request = transaction.request()
+    request.input('orderId', mssql.Int, input.ID_Order)
+    request.input('type', mssql.NVarChar, input.ID_Tp_Reconhecimento)
+    request.input('date', mssql.DateTime, input.DT_Reconhecimento)
+    request.input('value', mssql.Money, input.Valor_Reconhecimento)
+    request.input('user', mssql.NVarChar, user)
+    const inserted = await request.query<Record<string, unknown>>(
+      `INSERT INTO [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
+        (ID_Order, ID_Tp_Reconhecimento, DT_Reconhecimento, Valor_Reconhecimento, ID_User, DT_User)
+       OUTPUT INSERTED.ID_Reconhecimento, INSERTED.ID_Order,
+              INSERTED.ID_Tp_Reconhecimento, INSERTED.DT_Reconhecimento,
+              INSERTED.Valor_Reconhecimento, INSERTED.ID_User, INSERTED.DT_User
+       VALUES (@orderId, @type, @date, @value, @user, GETUTCDATE())`,
+    )
+    const row = inserted.recordset[0]
+    if (!row) throw new Error('The database did not return the recognition row.')
+    await transaction.commit()
+    return toReconhecimentoRow(row)
+  } catch (error) {
+    await transaction.rollback().catch(() => undefined)
+    throw error
+  }
+}
+
+export async function updateReconhecimento(
+  pool: ConnectionPool,
+  id: number,
+  patch: ReconhecimentoPatch,
+  user: string,
+): Promise<ReconhecimentoRow | null> {
+  const transaction = pool.transaction()
+  await transaction.begin()
+  try {
+    const initialRequest = transaction.request()
+    initialRequest.input('id', mssql.Int, id)
+    const initial = await initialRequest.query<Record<string, unknown>>(
+      `SELECT ID_Order
+       FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
+       WHERE ID_Reconhecimento = @id`,
+    )
+    const orderId = numberOrNull(initial.recordset[0]?.ID_Order)
+    if (orderId === null) {
+      await transaction.rollback()
+      return null
+    }
+
+    const order = await lockRecognitionOrder(transaction, orderId)
+    const currentRequest = transaction.request()
+    currentRequest.input('id', mssql.Int, id)
+    const currentResult = await currentRequest.query<Record<string, unknown>>(
+      `SELECT ID_Reconhecimento, ID_Order, ID_Tp_Reconhecimento, DT_Reconhecimento,
+              Valor_Reconhecimento, ID_User, DT_User
+       FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}] WITH (UPDLOCK, HOLDLOCK)
+       WHERE ID_Reconhecimento = @id`,
+    )
+    const currentRaw = currentResult.recordset[0]
+    if (!currentRaw || numberOrNull(currentRaw.ID_Order) !== orderId) {
+      await transaction.rollback()
+      return null
+    }
+    const current = toReconhecimentoRow(currentRaw)
+    const type = patch.ID_Tp_Reconhecimento ?? current.ID_Tp_Reconhecimento
+    const date = patch.DT_Reconhecimento ?? current.DT_Reconhecimento
+    const value = patch.Valor_Reconhecimento ?? current.Valor_Reconhecimento
+    if (type === null || date === null || value === null) {
+      throw new Error('Recognition rows require type, date, and value.')
+    }
+
+    const existingRows = await readRecognitionCapacityRows(transaction, orderId, id)
+    assertRecognitionCapacity(order, existingRows, type, value)
+
+    const request = transaction.request()
+    request.input('id', mssql.Int, id)
+    request.input('user', mssql.NVarChar, user)
+    const setClauses: string[] = []
+    for (const { column, type: sqlType } of RECONHECIMENTO_UPDATEABLE_COLUMNS) {
+      if (column in patch) {
+        setClauses.push(`${column} = @${column}`)
+        request.input(column, sqlType, patch[column])
+      }
+    }
+    setClauses.push('ID_User = @user', 'DT_User = GETUTCDATE()')
+    const updated = await request.query<Record<string, unknown>>(
+      `UPDATE [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
+       SET ${setClauses.join(', ')}
+       OUTPUT INSERTED.ID_Reconhecimento, INSERTED.ID_Order,
+              INSERTED.ID_Tp_Reconhecimento, INSERTED.DT_Reconhecimento,
+              INSERTED.Valor_Reconhecimento, INSERTED.ID_User, INSERTED.DT_User
+       WHERE ID_Reconhecimento = @id`,
+    )
+    const row = updated.recordset[0]
+    if (!row) {
+      await transaction.rollback()
+      return null
+    }
+    await transaction.commit()
+    return toReconhecimentoRow(row)
+  } catch (error) {
+    await transaction.rollback().catch(() => undefined)
+    throw error
+  }
+}
+
+export async function deleteReconhecimento(pool: ConnectionPool, id: number): Promise<boolean> {
+  const request = pool.request()
+  request.input('id', mssql.Int, id)
+  const result = await request.query(
+    `DELETE FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
+     WHERE ID_Reconhecimento = @id`,
+  )
+  return (result.rowsAffected[0] ?? 0) > 0
+}
+
+export async function propagateReconhecimento(
+  pool: ConnectionPool,
+  input: PropagateReconhecimentoInput,
+  user: string,
+): Promise<ReconhecimentoRow[]> {
+  const transaction = pool.transaction()
+  await transaction.begin()
+  try {
+    const request = transaction.request()
+    request.input('orderId', mssql.Int, input.orderId)
+    const orderResult = await request.query<Record<string, unknown>>(
+      `SELECT o.ID_Order, o.ID_Tipo, t.Warranty AS Tipo_Warranty,
+              o.Sell_Price, o.Warranty_Reserve, o.Warranty_DT_Inicio,
+              tw.N_Anos
+       FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o WITH (UPDLOCK, HOLDLOCK)
+       LEFT JOIN [${ORDERS_SCHEMA}].[Tipo] AS t ON o.ID_Tipo = t.ID_Tipo
+       LEFT JOIN [${ORDERS_SCHEMA}].[Tp_Warranty] AS tw
+         ON o.ID_Tp_Warranty = tw.ID_Tp_Warranty
        WHERE o.ID_Order = @orderId`,
     )
     const order = orderResult.recordset[0]
-    if (!order) throw new Error('Order not found.')
-    const isWarranty = input.ID_Tp_Reconhecimento === 'W' || input.ID_Tp_Reconhecimento === 'WP'
-    const cap = isWarranty
-      ? numberOrNull(order.Warranty_Reserve) ?? 0
-      : (numberOrNull(order.Sell_Price) ?? 0) - (numberOrNull(order.Warranty_Reserve) ?? 0)
-    // Calculate the bucket from rows read inside the same transaction as the lock.
-    const rowsRequest = transaction.request()
-    rowsRequest.input('orderId', mssql.Int, input.ID_Order)
-    const rowsResult = await rowsRequest.query<Record<string, unknown>>(
-      `SELECT ID_Tp_Reconhecimento, Valor_Reconhecimento
-       FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
-       WHERE ID_Order = @orderId`,
-    )
-    const currentTotal = rowsResult.recordset.reduce((sum, row) => {
-      const rowWarranty = row.ID_Tp_Reconhecimento === 'W' || row.ID_Tp_Reconhecimento === 'WP'
-      return rowWarranty === isWarranty ? sum + (numberOrNull(row.Valor_Reconhecimento) ?? 0) : sum
-    }, 0)
-    if (input.Valor_Reconhecimento + currentTotal > cap + 0.0001) {
-      throw new RecognitionCapacityError(`Recognition exceeds the remaining ${isWarranty ? 'warranty' : 'instrument'} capacity.`)
+    if (!order) {
+      throw new DatabaseRowNotFoundError(`Order ${input.orderId} was not found.`)
     }
-    const insertRequest = transaction.request()
-    insertRequest.input('orderId', mssql.Int, input.ID_Order)
-    insertRequest.input('type', mssql.NVarChar, input.ID_Tp_Reconhecimento)
-    insertRequest.input('date', mssql.DateTime, input.DT_Reconhecimento)
-    insertRequest.input('value', mssql.Money, input.Valor_Reconhecimento)
-    insertRequest.input('user', mssql.NVarChar, user)
-    const inserted = await insertRequest.query<{ ID_Reconhecimento: number }>(
-      `INSERT INTO [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
-        (ID_Order, ID_Tp_Reconhecimento, DT_Reconhecimento, Valor_Reconhecimento, ID_User, DT_User)
-       OUTPUT INSERTED.ID_Reconhecimento
-       VALUES (@orderId, @type, @date, @value, @user, GETUTCDATE())`,
-    )
+
+    const lines = planPropagationLines(order, input)
+    if (lines.length === 0) {
+      await transaction.commit()
+      return []
+    }
+
+    const existingRows = await readRecognitionCapacityRows(transaction, input.orderId)
+    const plannedTotal = lines.reduce((sum, line) => sum + line.value, 0)
+    assertRecognitionCapacity(order, existingRows, lines[0]?.type ?? '', plannedTotal)
+
+    const created: ReconhecimentoRow[] = []
+    for (let offset = 0; offset < lines.length; offset += PROPAGATION_CHUNK_SIZE) {
+      const chunk = lines.slice(offset, offset + PROPAGATION_CHUNK_SIZE)
+      const insertRequest = transaction.request()
+      insertRequest.input('orderId', mssql.Int, input.orderId)
+      insertRequest.input('type', mssql.NVarChar, chunk[0]?.type)
+      insertRequest.input('user', mssql.NVarChar, user)
+      const values = chunk.map((line, index) => {
+        insertRequest.input(`date${index}`, mssql.DateTime, line.date)
+        insertRequest.input(`value${index}`, mssql.Money, line.value)
+        return `(@orderId, @type, @date${index}, @value${index}, @user, GETUTCDATE())`
+      })
+      const inserted = await insertRequest.query<Record<string, unknown>>(
+        `INSERT INTO [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
+          (ID_Order, ID_Tp_Reconhecimento, DT_Reconhecimento, Valor_Reconhecimento, ID_User, DT_User)
+         OUTPUT INSERTED.ID_Reconhecimento, INSERTED.ID_Order,
+                INSERTED.ID_Tp_Reconhecimento, INSERTED.DT_Reconhecimento,
+                INSERTED.Valor_Reconhecimento, INSERTED.ID_User, INSERTED.DT_User
+         VALUES ${values.join(', ')}`,
+      )
+      created.push(...inserted.recordset.map(toReconhecimentoRow))
+    }
+
+    if (created.length !== lines.length) {
+      throw new Error('The database did not return every propagated recognition row.')
+    }
     await transaction.commit()
-    const id = inserted.recordset[0]?.ID_Reconhecimento
-    if (!id) throw new Error('The database did not return the recognition identifier.')
-    const result = await pool.request().input('id', mssql.Int, id).query<Record<string, unknown>>(
-      `SELECT ID_Reconhecimento, ID_Order, ID_Tp_Reconhecimento, DT_Reconhecimento,
-              Valor_Reconhecimento, ID_User, DT_User
-       FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}] WHERE ID_Reconhecimento = @id`,
-    )
-    return toReconhecimentoRow(result.recordset[0])
+    return created.sort((left, right) => {
+      const byDate = (left.DT_Reconhecimento ?? '').localeCompare(right.DT_Reconhecimento ?? '')
+      return byDate !== 0 ? byDate : left.ID_Reconhecimento - right.ID_Reconhecimento
+    })
   } catch (error) {
     await transaction.rollback().catch(() => undefined)
     throw error
@@ -603,25 +865,342 @@ export async function addFacturacao(
   input: NewFacturacaoInput,
   user: string,
 ): Promise<DocumentoFaturacaoRow> {
+  const transaction = pool.transaction()
+  await transaction.begin()
+  try {
+    const sellPrice = await lockInvoicingOrder(transaction, input.ID_Order)
+    const existing = await readInvoicingCapacityRows(transaction, input.ID_Order)
+    assertInvoicingCapacity(sellPrice, existing, input.Valor_Doc_FT)
+
+    const request = transaction.request()
+    request.input('orderId', mssql.Int, input.ID_Order)
+    request.input('date', mssql.DateTime, input.DT_Doc_FT)
+    request.input('type', mssql.NVarChar, input.ID_Tp_Doc_FT)
+    request.input('number', mssql.NVarChar, input.N_Doc_FT)
+    request.input('value', mssql.Money, input.Valor_Doc_FT)
+    request.input('user', mssql.NVarChar, user)
+    const inserted = await request.query<Record<string, unknown>>(
+      `INSERT INTO [${ORDERS_SCHEMA}].[${FACTURACAO_TABLE}]
+        (ID_Order, DT_Doc_FT, ID_Tp_Doc_FT, N_Doc_FT, Valor_Doc_FT, ID_User, DT_User)
+       OUTPUT INSERTED.ID_Facturacao, INSERTED.ID_Order, INSERTED.DT_Doc_FT,
+              INSERTED.ID_Tp_Doc_FT, INSERTED.N_Doc_FT, INSERTED.Valor_Doc_FT,
+              INSERTED.ID_User, INSERTED.DT_User
+       VALUES (@orderId, @date, @type, @number, @value, @user, GETUTCDATE())`,
+    )
+    const row = inserted.recordset[0]
+    if (!row) throw new Error('The database did not return the invoice row.')
+    await transaction.commit()
+    return toFacturacaoRow(row)
+  } catch (error) {
+    await transaction.rollback().catch(() => undefined)
+    throw error
+  }
+}
+
+export async function updateFacturacao(
+  pool: ConnectionPool,
+  id: number,
+  patch: FacturacaoPatch,
+  user: string,
+): Promise<DocumentoFaturacaoRow | null> {
+  const transaction = pool.transaction()
+  await transaction.begin()
+  try {
+    const initialRequest = transaction.request()
+    initialRequest.input('id', mssql.Int, id)
+    const initial = await initialRequest.query<Record<string, unknown>>(
+      `SELECT ID_Order
+       FROM [${ORDERS_SCHEMA}].[${FACTURACAO_TABLE}]
+       WHERE ID_Facturacao = @id`,
+    )
+    const orderId = numberOrNull(initial.recordset[0]?.ID_Order)
+    if (orderId === null) {
+      await transaction.rollback()
+      return null
+    }
+
+    const sellPrice = await lockInvoicingOrder(transaction, orderId)
+    const currentRequest = transaction.request()
+    currentRequest.input('id', mssql.Int, id)
+    const currentResult = await currentRequest.query<Record<string, unknown>>(
+      `SELECT ID_Facturacao, ID_Order, DT_Doc_FT, ID_Tp_Doc_FT, N_Doc_FT,
+              Valor_Doc_FT, ID_User, DT_User
+       FROM [${ORDERS_SCHEMA}].[${FACTURACAO_TABLE}] WITH (UPDLOCK, HOLDLOCK)
+       WHERE ID_Facturacao = @id`,
+    )
+    const currentRaw = currentResult.recordset[0]
+    if (!currentRaw || numberOrNull(currentRaw.ID_Order) !== orderId) {
+      await transaction.rollback()
+      return null
+    }
+    const current = toFacturacaoRow(currentRaw)
+    const value = patch.Valor_Doc_FT ?? current.Valor_Doc_FT
+    if (value === null) throw new Error('Invoice rows require a value.')
+
+    const existing = await readInvoicingCapacityRows(transaction, orderId, id)
+    assertInvoicingCapacity(sellPrice, existing, value)
+
+    const request = transaction.request()
+    request.input('id', mssql.Int, id)
+    request.input('user', mssql.NVarChar, user)
+    const setClauses: string[] = []
+    for (const { column, type } of FACTURACAO_UPDATEABLE_COLUMNS) {
+      if (column in patch) {
+        setClauses.push(`${column} = @${column}`)
+        request.input(column, type, patch[column])
+      }
+    }
+    setClauses.push('ID_User = @user', 'DT_User = GETUTCDATE()')
+    const updated = await request.query<Record<string, unknown>>(
+      `UPDATE [${ORDERS_SCHEMA}].[${FACTURACAO_TABLE}]
+       SET ${setClauses.join(', ')}
+       OUTPUT INSERTED.ID_Facturacao, INSERTED.ID_Order, INSERTED.DT_Doc_FT,
+              INSERTED.ID_Tp_Doc_FT, INSERTED.N_Doc_FT, INSERTED.Valor_Doc_FT,
+              INSERTED.ID_User, INSERTED.DT_User
+       WHERE ID_Facturacao = @id`,
+    )
+    const row = updated.recordset[0]
+    if (!row) {
+      await transaction.rollback()
+      return null
+    }
+    await transaction.commit()
+    return toFacturacaoRow(row)
+  } catch (error) {
+    await transaction.rollback().catch(() => undefined)
+    throw error
+  }
+}
+
+export async function deleteFacturacao(pool: ConnectionPool, id: number): Promise<boolean> {
   const request = pool.request()
-  request.input('orderId', mssql.Int, input.ID_Order)
-  request.input('date', mssql.DateTime, input.DT_Doc_FT)
-  request.input('type', mssql.NVarChar, input.ID_Tp_Doc_FT)
-  request.input('number', mssql.NVarChar, input.N_Doc_FT)
-  request.input('value', mssql.Money, input.Valor_Doc_FT)
-  request.input('user', mssql.NVarChar, user)
-  const result = await request.query<{ ID_Facturacao: number }>(
-    `INSERT INTO [${ORDERS_SCHEMA}].[${FACTURACAO_TABLE}]
-      (ID_Order, DT_Doc_FT, ID_Tp_Doc_FT, N_Doc_FT, Valor_Doc_FT, ID_User, DT_User)
-     OUTPUT INSERTED.ID_Facturacao
-     VALUES (@orderId, @date, @type, @number, @value, @user, GETUTCDATE())`,
+  request.input('id', mssql.Int, id)
+  const result = await request.query(
+    `DELETE FROM [${ORDERS_SCHEMA}].[${FACTURACAO_TABLE}]
+     WHERE ID_Facturacao = @id`,
   )
-  const id = result.recordset[0]?.ID_Facturacao
-  if (!id) throw new Error('The database did not return the invoice identifier.')
-  const rows = await fetchFacturacao(pool, input.ID_Order)
-  const inserted = rows.find((item) => item.ID_Facturacao === id)
-  if (!inserted) throw new Error('The invoice could not be read after creation.')
-  return inserted
+  return (result.rowsAffected[0] ?? 0) > 0
+}
+
+type TransactionLike = ReturnType<ConnectionPool['transaction']>
+type RecognitionCapacityRow = Pick<
+  ReconhecimentoRow,
+  'ID_Tp_Reconhecimento' | 'Valor_Reconhecimento'
+>
+type PropagationLine = { type: 'WP' | 'CM'; date: Date; value: number }
+
+async function lockRecognitionOrder(
+  transaction: TransactionLike,
+  orderId: number,
+): Promise<Record<string, unknown>> {
+  const request = transaction.request()
+  request.input('orderId', mssql.Int, orderId)
+  const result = await request.query<Record<string, unknown>>(
+    `SELECT o.Sell_Price, o.Warranty_Reserve, t.Warranty AS Tipo_Warranty
+     FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o WITH (UPDLOCK, HOLDLOCK)
+     LEFT JOIN [${ORDERS_SCHEMA}].[Tipo] AS t ON o.ID_Tipo = t.ID_Tipo
+     WHERE o.ID_Order = @orderId`,
+  )
+  const order = result.recordset[0]
+  if (!order) throw new DatabaseRowNotFoundError(`Order ${orderId} was not found.`)
+  return order
+}
+
+async function readRecognitionCapacityRows(
+  transaction: TransactionLike,
+  orderId: number,
+  excludeId?: number,
+): Promise<RecognitionCapacityRow[]> {
+  const request = transaction.request()
+  request.input('orderId', mssql.Int, orderId)
+  if (excludeId !== undefined) request.input('excludeId', mssql.Int, excludeId)
+  const result = await request.query<Record<string, unknown>>(
+    `SELECT ID_Tp_Reconhecimento, Valor_Reconhecimento
+     FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}] WITH (UPDLOCK, HOLDLOCK)
+     WHERE ID_Order = @orderId${excludeId === undefined ? '' : ' AND ID_Reconhecimento <> @excludeId'}`,
+  )
+  return result.recordset.map((row) => ({
+    ID_Tp_Reconhecimento: stringOrNull(row.ID_Tp_Reconhecimento),
+    Valor_Reconhecimento: numberOrNull(row.Valor_Reconhecimento),
+  }))
+}
+
+function assertRecognitionCapacity(
+  order: Record<string, unknown>,
+  existingRows: RecognitionCapacityRow[],
+  candidateType: string,
+  candidateValue: number,
+): void {
+  const sellPrice = numberOrNull(order.Sell_Price)
+  if (sellPrice === null) {
+    throw new RecognitionCapacityError('O Sell Price é obrigatório para reconhecer valores.')
+  }
+  const warrantyReserve =
+    booleanOrNull(order.Tipo_Warranty) === true
+      ? (numberOrNull(order.Warranty_Reserve) ?? 0)
+      : 0
+  let instrument = 0
+  let warranty = 0
+  for (const row of existingRows) {
+    const value = row.Valor_Reconhecimento ?? 0
+    if (isWarrantyRecognitionType(row.ID_Tp_Reconhecimento)) warranty += value
+    else instrument += value
+  }
+  if (isWarrantyRecognitionType(candidateType)) warranty += candidateValue
+  else instrument += candidateValue
+
+  const total = instrument + warranty
+  if (total > sellPrice + MONEY_EPSILON) {
+    throw new RecognitionCapacityError('O total reconhecido não pode ultrapassar o Sell Price.')
+  }
+  if (warranty > warrantyReserve + MONEY_EPSILON) {
+    throw new RecognitionCapacityError(
+      'O total reconhecido em garantia não pode ultrapassar a Warranty Reserve.',
+    )
+  }
+  if (instrument > sellPrice - warrantyReserve + MONEY_EPSILON) {
+    throw new RecognitionCapacityError(
+      'O valor reservado para garantia não pode ser reconhecido com outro tipo de reconhecimento.',
+    )
+  }
+}
+
+function assertExistingRecognitionCapacity(
+  order: Record<string, unknown>,
+  existingRows: RecognitionCapacityRow[],
+): void {
+  if (existingRows.some((row) => (row.Valor_Reconhecimento ?? 0) !== 0)) {
+    assertRecognitionCapacity(order, existingRows, '', 0)
+  }
+}
+
+function assertExistingInvoicingCapacity(
+  order: Record<string, unknown>,
+  existingRows: Array<{ Valor_Doc_FT: number | null }>,
+): void {
+  if (!existingRows.some((row) => (row.Valor_Doc_FT ?? 0) !== 0)) return
+  const sellPrice = numberOrNull(order.Sell_Price)
+  if (sellPrice === null) {
+    throw new FacturacaoCapacityError('O Sell Price é obrigatório para faturar valores.')
+  }
+  assertInvoicingCapacity(sellPrice, existingRows, 0)
+}
+
+function isWarrantyRecognitionType(type: unknown): boolean {
+  return type === 'W' || type === 'WP'
+}
+
+async function lockInvoicingOrder(transaction: TransactionLike, orderId: number): Promise<number> {
+  const request = transaction.request()
+  request.input('orderId', mssql.Int, orderId)
+  const result = await request.query<Record<string, unknown>>(
+    `SELECT Sell_Price
+     FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] WITH (UPDLOCK, HOLDLOCK)
+     WHERE ID_Order = @orderId`,
+  )
+  if (!result.recordset[0]) {
+    throw new DatabaseRowNotFoundError(`Order ${orderId} was not found.`)
+  }
+  const sellPrice = numberOrNull(result.recordset[0].Sell_Price)
+  if (sellPrice === null) {
+    throw new FacturacaoCapacityError('O Sell Price é obrigatório para faturar valores.')
+  }
+  return sellPrice
+}
+
+async function readInvoicingCapacityRows(
+  transaction: TransactionLike,
+  orderId: number,
+  excludeId?: number,
+): Promise<Array<{ Valor_Doc_FT: number | null }>> {
+  const request = transaction.request()
+  request.input('orderId', mssql.Int, orderId)
+  if (excludeId !== undefined) request.input('excludeId', mssql.Int, excludeId)
+  const result = await request.query<Record<string, unknown>>(
+    `SELECT Valor_Doc_FT
+     FROM [${ORDERS_SCHEMA}].[${FACTURACAO_TABLE}] WITH (UPDLOCK, HOLDLOCK)
+     WHERE ID_Order = @orderId${excludeId === undefined ? '' : ' AND ID_Facturacao <> @excludeId'}`,
+  )
+  return result.recordset.map((row) => ({ Valor_Doc_FT: numberOrNull(row.Valor_Doc_FT) }))
+}
+
+function assertInvoicingCapacity(
+  sellPrice: number,
+  existingRows: Array<{ Valor_Doc_FT: number | null }>,
+  candidateValue: number,
+): void {
+  const currentNet = existingRows.reduce((sum, row) => sum + (row.Valor_Doc_FT ?? 0), 0)
+  if (currentNet + candidateValue > sellPrice + MONEY_EPSILON) {
+    throw new FacturacaoCapacityError('O net faturado não pode ultrapassar o Sell Price.')
+  }
+}
+
+function planPropagationLines(
+  order: Record<string, unknown>,
+  input: PropagateReconhecimentoInput,
+): PropagationLine[] {
+  if (input.kind === 'warranty') {
+    if (booleanOrNull(order.Tipo_Warranty) !== true) {
+      throw new PropagationValidationError('Este tipo de pedido não tem garantia.')
+    }
+    const warrantyReserve = numberOrNull(order.Warranty_Reserve)
+    const start = dateOrNull(order.Warranty_DT_Inicio)
+    const years = numberOrNull(order.N_Anos)
+    if (warrantyReserve === null || warrantyReserve <= 0 || start === null || years === null) {
+      throw new PropagationValidationError(
+        'Warranty Reserve, início e duração da garantia são obrigatórios.',
+      )
+    }
+    const months = (years - 1) * 12
+    if (months <= 0) return []
+    const values = allocateMoney(warrantyReserve, months)
+    const first = addUtcMonths(firstUtcMonth(start), 12)
+    return values.map((value, index) => ({
+      type: 'WP',
+      date: addUtcMonths(first, index),
+      value,
+    }))
+  }
+
+  if (stringOrNull(order.ID_Tipo) !== 'CM') {
+    throw new PropagationValidationError('A propagação de contrato só se aplica ao tipo CM.')
+  }
+  const sellPrice = numberOrNull(order.Sell_Price)
+  const start = dateOrNull(input.startDate)
+  if (sellPrice === null || sellPrice <= 0 || start === null) {
+    throw new PropagationValidationError('Sell Price e início do contrato são obrigatórios.')
+  }
+  const months = input.years * 12
+  const values = allocateMoney(sellPrice, months)
+  const first = firstUtcMonth(start)
+  return values.map((value, index) => ({
+    type: 'CM',
+    date: addUtcMonths(first, index),
+    value,
+  }))
+}
+
+function allocateMoney(total: number, count: number): number[] {
+  const totalUnits = Math.round(total * 10_000)
+  const baseUnits = Math.floor(totalUnits / count)
+  const remainder = totalUnits - baseUnits * count
+  return Array.from(
+    { length: count },
+    (_, index) => (baseUnits + (index < remainder ? 1 : 0)) / 10_000,
+  )
+}
+
+function dateOrNull(value: unknown): Date | null {
+  const date = value instanceof Date ? value : typeof value === 'string' ? new Date(value) : null
+  return date !== null && !Number.isNaN(date.getTime()) ? date : null
+}
+
+function firstUtcMonth(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1))
+}
+
+function addUtcMonths(date: Date, months: number): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1))
 }
 
 export async function fetchUtilizadores(pool: ConnectionPool): Promise<UtilizadorRow[]> {
@@ -703,6 +1282,7 @@ function toSummaryRow(row: Record<string, unknown>): OrderSummaryRow {
 function toDetailRow(row: Record<string, unknown>): OrderDetailRow {
   return {
     ...toSummaryRow(row),
+    Tipo_Warranty: booleanOrNull(row['Tipo_Warranty']),
     Orc_Proposta: stringOrNull(row['Orc_Proposta']),
     PO_Cliente: stringOrNull(row['PO_Cliente']),
     ID_Tp_Warranty: numberOrNull(row['ID_Tp_Warranty']),

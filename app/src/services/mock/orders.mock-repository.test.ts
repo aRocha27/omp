@@ -7,18 +7,22 @@
  */
 import { describe, it, expect } from 'vitest'
 import { MockOrdersRepository } from '@/services/mock/orders.mock-repository'
+import { MockReconhecimentoRepository } from '@/services/mock/reconhecimento.mock-repository'
+import { MockDocumentoFaturacaoRepository } from '@/services/mock/documento-faturacao.mock-repository'
+import { MockDataStore } from '@/services/mock/mock-data-store'
 import { RepositoryError } from '@/services/contracts/orders.repository'
 
 describe('MockOrdersRepository', () => {
   const repo = new MockOrdersRepository()
 
   describe('search', () => {
-    it('returns all 6 rows by default, newest-first (DT_Order DESC, ID_Order DESC)', async () => {
+    it('returns all 7 rows by default, newest-first (DT_Order DESC, ID_Order DESC)', async () => {
       const rows = await repo.search({})
-      expect(rows).toHaveLength(6)
+      expect(rows).toHaveLength(7)
       const ids = rows.map((r) => r.ID_Order)
-      // Same-date ties (1001 & 1002 on 2025-09-12) break by higher ID_Order first.
-      expect(ids).toEqual([1002, 1001, 1003, 1004, 1005, 1006])
+      // 1007 (2025-10-10) newest; then the 1001 & 1002 tie on 2025-09-12 (higher ID first),
+      // then 1003, 1004, 1005, 1006.
+      expect(ids).toEqual([1007, 1002, 1001, 1003, 1004, 1005, 1006])
     })
 
     it('excludes the null-row 1006 when clientName filter is set (null-row regression)', async () => {
@@ -52,8 +56,8 @@ describe('MockOrdersRepository', () => {
     it('filters by dateFrom inclusive', async () => {
       const rows = await repo.search({ dateFrom: '2025-09-01' })
       const ids = rows.map((r) => r.ID_Order)
-      // 1001 & 1002 are 2025-09-12; 1006 is 2025-06-04 (excluded by date).
-      expect(ids).toEqual([1002, 1001])
+      // 1007 (2025-10-10) and 1001 & 1002 (2025-09-12); 1006 is 2025-06-04 (excluded).
+      expect(ids).toEqual([1007, 1002, 1001])
       expect(ids).not.toContain(1006)
     })
 
@@ -85,7 +89,7 @@ describe('MockOrdersRepository', () => {
       expect(area1).not.toContain(1006)
 
       const area2 = (await repo.search({ idArea: ['BOPT'] })).map((r) => r.ID_Order)
-      expect(area2).toEqual([1003, 1004])
+      expect(area2).toEqual([1007, 1003, 1004])
     })
 
     it('filters by idProduto and excludes the null-row 1006', async () => {
@@ -107,7 +111,7 @@ describe('MockOrdersRepository', () => {
       expect(com).toEqual([1002, 1003])
 
       const client = (await repo.search({ idTpOrder: ['C'] })).map((r) => r.ID_Order)
-      expect(client).toEqual([1001, 1004, 1005])
+      expect(client).toEqual([1007, 1001, 1004, 1005])
       expect(client).not.toContain(1006)
     })
 
@@ -181,6 +185,122 @@ describe('MockOrdersRepository', () => {
       const error = await repo.update(99999, { Sell_Price: 1 }, 'admin').catch((e) => e)
       expect(error).toBeInstanceOf(RepositoryError)
       expect(error).toMatchObject({ kind: 'not-found', message: 'Order not found.' })
+    })
+
+    it('rejects viewer mutations before changing the order', async () => {
+      const before = await repo.getById(1004)
+      await expect(
+        repo.update(1004, { Obs: 'forbidden' }, 'viewer'),
+      ).rejects.toMatchObject({ kind: 'forbidden' })
+      expect(await repo.getById(1004)).toEqual(before)
+    })
+  })
+
+  describe('shared mutable state', () => {
+    it('makes an updated Sell Price authoritative for recognition and invoicing writes', async () => {
+      const store = new MockDataStore()
+      const ordersRepo = new MockOrdersRepository(store)
+      const recognitionRepo = new MockReconhecimentoRepository(store)
+      const invoicingRepo = new MockDocumentoFaturacaoRepository(store)
+
+      await ordersRepo.update(1004, { Sell_Price: 1_000 }, 'editor')
+
+      await expect(recognitionRepo.add({
+        ID_Order: 1004,
+        ID_Tp_Reconhecimento: 'P',
+        DT_Reconhecimento: '2025-11-01T00:00:00Z',
+        Valor_Reconhecimento: 1_001,
+      }, 'editor')).rejects.toMatchObject({
+        message: 'O total reconhecido não pode ultrapassar o Sell Price.',
+      })
+      await expect(invoicingRepo.add({
+        ID_Order: 1004,
+        ID_Tp_Doc_FT: 'FT',
+        N_Doc_FT: 'FT shared state',
+        DT_Doc_FT: '2025-11-01T00:00:00Z',
+        Valor_Doc_FT: 1_001,
+      }, 'editor')).rejects.toMatchObject({
+        message: 'O net faturado não pode ultrapassar o Sell Price.',
+      })
+    })
+
+    it('rejects an order update that would invalidate existing recognition rows', async () => {
+      const store = new MockDataStore()
+      const ordersRepo = new MockOrdersRepository(store)
+
+      await expect(
+        ordersRepo.update(1001, { Sell_Price: 35_000 }, 'editor'),
+      ).rejects.toMatchObject({
+        message: 'O total reconhecido não pode ultrapassar o Sell Price.',
+      })
+      expect((await ordersRepo.getById(1001))?.Sell_Price).toBe(48_500)
+    })
+
+    it('recomputes Tipo_Warranty from ID_Tipo and ignores a stale reserve for CM capacity', async () => {
+      const store = new MockDataStore()
+      const ordersRepo = new MockOrdersRepository(store)
+      const recognitionRepo = new MockReconhecimentoRepository(store)
+
+      await ordersRepo.update(1004, { Warranty_Reserve: 500 }, 'editor')
+      const updated = await ordersRepo.update(1004, { ID_Tipo: 'CM' }, 'editor')
+
+      expect(updated.Tipo_Warranty).toBe(false)
+      await expect(recognitionRepo.add({
+        ID_Order: 1004,
+        ID_Tp_Reconhecimento: 'P',
+        DT_Reconhecimento: '2025-11-01T00:00:00Z',
+        Valor_Reconhecimento: 39_500,
+      }, 'editor')).resolves.toMatchObject({ Valor_Reconhecimento: 39_500 })
+    })
+
+    it('makes newly created orders immediately available to subtable repositories', async () => {
+      const store = new MockDataStore()
+      const ordersRepo = new MockOrdersRepository(store)
+      const recognitionRepo = new MockReconhecimentoRepository(store)
+
+      const created = await ordersRepo.create({
+        DT_Order: '2025-11-01T00:00:00Z',
+        ID_Tp_Order: 'C',
+        ID_Area: 'BOPT',
+        ID_Tipo: 'CM',
+        ID_Produto: 13,
+        Sell_Price: 1_200,
+      }, 'editor')
+
+      await expect(recognitionRepo.add({
+        ID_Order: created.ID_Order,
+        ID_Tp_Reconhecimento: 'CM',
+        DT_Reconhecimento: '2025-11-01T00:00:00Z',
+        Valor_Reconhecimento: 1_200,
+      }, 'editor')).resolves.toMatchObject({ ID_Order: created.ID_Order })
+    })
+
+    it('rejects an order update that would invalidate existing invoicing rows', async () => {
+      const store = new MockDataStore()
+      const ordersRepo = new MockOrdersRepository(store)
+      const invoicingRepo = new MockDocumentoFaturacaoRepository(store)
+      const created = await ordersRepo.create({
+        DT_Order: '2025-11-01T00:00:00Z',
+        ID_Tp_Order: 'C',
+        ID_Area: 'BOPT',
+        ID_Tipo: 'CM',
+        ID_Produto: 13,
+        Sell_Price: 1_000,
+      }, 'editor')
+      await invoicingRepo.add({
+        ID_Order: created.ID_Order,
+        ID_Tp_Doc_FT: 'FT',
+        N_Doc_FT: 'FT update guard',
+        DT_Doc_FT: '2025-11-01T00:00:00Z',
+        Valor_Doc_FT: 800,
+      }, 'editor')
+
+      await expect(
+        ordersRepo.update(created.ID_Order, { Sell_Price: 700 }, 'editor'),
+      ).rejects.toMatchObject({
+        message: 'O net faturado não pode ultrapassar o Sell Price.',
+      })
+      expect((await ordersRepo.getById(created.ID_Order))?.Sell_Price).toBe(1_000)
     })
   })
 })

@@ -39,5 +39,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# MCP config — machine-specific absolute paths, keep local
+.mcp.json
+
 # Misc
 *.tmp

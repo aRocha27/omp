@@ -45,6 +45,15 @@ export interface Order {
   ID_Tipo: string | null
   ID_Produto: number | null
   ID_Instrumento: number | null
+  /**
+   * Whether this order's kind (`ID_Tipo`) carries a warranty, resolved from
+   * `dbo.Tipo.Warranty` (bit) via `Order.ID_Tipo = Tipo.ID_Tipo`. `true` for
+   * INSTR/ACESS/WARR, `false` for CM/CONS/SERVI/SPARE/TR/SOFT; `null` when the
+   * join found no `Tipo` row (or the live read has not resolved it). Drives the
+   * visibility of the warranty caracterização fields and the propagate-guarantia
+   * button (see domain/rules/recognition).
+   */
+  Tipo_Warranty: boolean | null
   /** Budget/proposal reference (nvarchar in the DB, not a money amount). */
   Orc_Proposta: string | null
   PO_Cliente: string | null

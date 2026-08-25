@@ -9,26 +9,32 @@
  * without mutating the imported `readonly` fixture export.
  */
 import type { DocumentoFaturacao } from '@/domain/models/documento-faturacao'
+import type { Role } from '@/domain/models/user'
 import type {
+  DocumentoFaturacaoPatch,
+  DocumentoFaturacaoType,
   DocumentoFaturacaoRepository,
   NewDocumentoFaturacao,
 } from '@/services/contracts/documento-faturacao.repository'
-import { facturacao } from '@/fixtures/facturacao'
+import { RepositoryError } from '@/services/contracts/orders.repository'
+import { tpDocFts } from '@/fixtures/reference-data'
+import { MockDataStore } from '@/services/mock/mock-data-store'
+import { assertMockMutationRole } from '@/services/mock/mock-authorization'
+import { assertNetInvoicingCapacity } from '@/services/mock/mock-capacity'
 
 /** Simulated network latency for realistic loading-state behaviour (ms). */
 const MOCK_LATENCY_MS = 120
 
 export class MockDocumentoFaturacaoRepository implements DocumentoFaturacaoRepository {
-  // Mutable session copy — `add` writes here, reads pull from here. Kept in sync
-  // with `nextId` so concurrent-ish adds stay deterministic and never collide.
   private readonly rows: DocumentoFaturacao[]
-  private nextId: number
 
-  constructor() {
-    this.rows = facturacao.map((row) => ({ ...row }))
-    // PK generator starts one above the highest existing fixture id.
-    this.nextId =
-      this.rows.reduce((max, row) => Math.max(max, row.ID_Facturacao), 0) + 1
+  constructor(private readonly store: MockDataStore = new MockDataStore()) {
+    this.rows = store.facturacao
+  }
+
+  async listTypes(): Promise<DocumentoFaturacaoType[]> {
+    await delay(MOCK_LATENCY_MS)
+    return tpDocFts.map((option) => ({ id: String(option.id), label: option.label }))
   }
 
   async listByOrder(orderId: number): Promise<DocumentoFaturacao[]> {
@@ -44,16 +50,68 @@ export class MockDocumentoFaturacaoRepository implements DocumentoFaturacaoRepos
       .map((row) => ({ ...row }))
   }
 
-  async add(entry: NewDocumentoFaturacao): Promise<DocumentoFaturacao> {
+  async add(entry: NewDocumentoFaturacao, role: Role): Promise<DocumentoFaturacao> {
     await delay(MOCK_LATENCY_MS)
+    assertMockMutationRole(role, 'Sem permissão para alterar documentos.')
+    const order = this.store.orders.find((row) => row.ID_Order === entry.ID_Order)
+    if (!order) {
+      throw new RepositoryError('not-found', 'Pedido não encontrado.')
+    }
+    assertNetInvoicingCapacity(
+      order,
+      this.rows.filter((row) => row.ID_Order === entry.ID_Order),
+      entry.Valor_Doc_FT,
+    )
     const created: DocumentoFaturacao = {
       ...entry,
-      ID_Facturacao: this.nextId++,
+      ID_Facturacao: this.store.allocateFacturacaoId(),
       ID_User: entry.ID_User ?? 'mock',
       DT_User: new Date().toISOString(),
     }
     this.rows.push(created)
     return { ...created }
+  }
+
+  async update(
+    id: number,
+    patch: DocumentoFaturacaoPatch,
+    role: Role,
+  ): Promise<DocumentoFaturacao> {
+    await delay(MOCK_LATENCY_MS)
+    assertMockMutationRole(role, 'Sem permissão para alterar documentos.')
+    const current = this.rows.find((row) => row.ID_Facturacao === id)
+    if (!current) {
+      throw new RepositoryError('not-found', 'Documento não encontrado.')
+    }
+    const value = patch.Valor_Doc_FT ?? current.Valor_Doc_FT
+    if (value === null) {
+      throw new RepositoryError('server-error', 'O valor do documento é obrigatório.')
+    }
+    const order = this.store.orders.find((row) => row.ID_Order === current.ID_Order)
+    if (!order) {
+      throw new RepositoryError('not-found', 'Pedido não encontrado.')
+    }
+    assertNetInvoicingCapacity(
+      order,
+      this.rows.filter((row) => row.ID_Order === current.ID_Order && row.ID_Facturacao !== id),
+      value,
+    )
+    Object.assign(current, patch, {
+      ID_User: 'mock',
+      DT_User: new Date().toISOString(),
+    })
+    return { ...current }
+  }
+
+  async remove(id: number, role: Role): Promise<void> {
+    await delay(MOCK_LATENCY_MS)
+    assertMockMutationRole(role, 'Sem permissão para alterar documentos.')
+    const index = this.rows.findIndex((row) => row.ID_Facturacao === id)
+    if (index === -1) {
+      throw new RepositoryError('not-found', 'Documento não encontrado.')
+    }
+    // Hard delete — dbo.Facturacao has no deleted_at column (DB cannot change).
+    this.rows.splice(index, 1)
   }
 }
 

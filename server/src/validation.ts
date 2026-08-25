@@ -104,7 +104,9 @@ const orderFiltersSchema = z.object({
   negocioFechado: z.boolean().optional(),
 })
 
-const orderDateSchema = z.string().refine((value) => !Number.isNaN(new Date(value).getTime()), 'Invalid date')
+const orderDateSchema = z
+  .string()
+  .refine((value) => !Number.isNaN(new Date(value).getTime()), 'Invalid date')
 
 export const ordersListBodySchema = z.object({
   filters: orderFiltersSchema.optional().default({}),
@@ -155,14 +157,16 @@ const orderUpdatePatchSchema = z.object({
   Kit_Amount: z.number().int().nonnegative().nullable().optional(),
 })
 
-export const orderCreateBodySchema = orderUpdatePatchSchema.extend({
-  DT_Order: orderDateSchema,
-  ID_Client: z.number().int().positive(),
-  ID_Tp_Order: z.string().trim().min(1),
-  ID_Area: z.string().trim().min(1),
-  ID_Tipo: z.string().trim().min(1),
-  ID_Produto: z.number().int().positive(),
-}).omit({ Facturado: true, Reconhecido: true, Negocio_Fechado: true })
+export const orderCreateBodySchema = orderUpdatePatchSchema
+  .extend({
+    DT_Order: orderDateSchema,
+    ID_Client: z.number().int().positive(),
+    ID_Tp_Order: z.string().trim().min(1),
+    ID_Area: z.string().trim().min(1),
+    ID_Tipo: z.string().trim().min(1),
+    ID_Produto: z.number().int().positive(),
+  })
+  .omit({ Facturado: true, Reconhecido: true, Negocio_Fechado: true })
 
 export const orderUpdateBodySchema = z.object({
   id: z.number().int().positive(),
@@ -185,6 +189,48 @@ export const facturacaoCreateBodySchema = z.object({
   N_Doc_FT: z.string().trim().min(1),
   Valor_Doc_FT: z.number().finite(),
 })
+
+const reconhecimentoPatchSchema = z.object({
+  ID_Tp_Reconhecimento: z.string().trim().min(1).optional(),
+  DT_Reconhecimento: orderDateSchema.optional(),
+  Valor_Reconhecimento: z.number().finite().nonnegative().optional(),
+})
+
+export const reconhecimentoUpdateBodySchema = z.object({
+  id: z.number().int().positive(),
+  patch: reconhecimentoPatchSchema.default({}),
+})
+
+const positiveIdBodySchema = z.object({ id: z.number().int().positive() })
+
+export const reconhecimentoDeleteBodySchema = positiveIdBodySchema
+
+export const reconhecimentoPropagateBodySchema = z.discriminatedUnion('kind', [
+  z.object({
+    orderId: z.number().int().positive(),
+    kind: z.literal('warranty'),
+  }),
+  z.object({
+    orderId: z.number().int().positive(),
+    kind: z.literal('maintenance'),
+    startDate: orderDateSchema,
+    years: z.number().int().min(1).max(100),
+  }),
+])
+
+const facturacaoPatchSchema = z.object({
+  DT_Doc_FT: orderDateSchema.optional(),
+  ID_Tp_Doc_FT: z.string().trim().min(1).optional(),
+  N_Doc_FT: z.string().trim().min(1).optional(),
+  Valor_Doc_FT: z.number().finite().optional(),
+})
+
+export const facturacaoUpdateBodySchema = z.object({
+  id: z.number().int().positive(),
+  patch: facturacaoPatchSchema.default({}),
+})
+
+export const facturacaoDeleteBodySchema = positiveIdBodySchema
 
 export const utilizadorCreateBodySchema = z.object({
   ID_User: z.string().trim().min(1).max(50),

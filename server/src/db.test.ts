@@ -3,13 +3,23 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ConnectionPool } from 'mssql'
 import {
   buildSqlConfig,
+  addFacturacao,
+  addReconhecimento,
+  deleteFacturacao,
+  deleteReconhecimento,
+  fetchFacturacaoTypes,
   fetchOrderById,
   fetchOrderSummaries,
   fetchRows,
   isHistoricoRow,
   isLockedCaracterizacaoField,
   listTables,
+  propagateReconhecimento,
+  RecognitionCapacityError,
+  FacturacaoCapacityError,
+  updateFacturacao,
   updateOrder,
+  updateReconhecimento,
 } from './db.js'
 
 // mssql is CommonJS; load it the same way db.ts does so the type constants (Int, NVarChar,
@@ -18,6 +28,7 @@ const mssql = createRequire(import.meta.url)('mssql') as typeof import('mssql')
 
 type QueryResult = {
   recordset: Record<string, unknown>[] & { columns?: Record<string, unknown> }
+  rowsAffected?: number[]
 }
 
 function poolReturning(...results: QueryResult[]): ConnectionPool {
@@ -55,6 +66,63 @@ function capturingPool(recordset: Record<string, unknown>[]): {
   return { pool, captured }
 }
 
+type TransactionResult = {
+  recordset?: Record<string, unknown>[]
+  rowsAffected?: number[]
+}
+
+type CapturedTransactionRequest = {
+  inputs: CapturedInput[]
+  sql: string
+}
+
+function transactionPool(...results: TransactionResult[]): {
+  pool: ConnectionPool
+  captured: CapturedTransactionRequest[]
+  begin: ReturnType<typeof vi.fn>
+  commit: ReturnType<typeof vi.fn>
+  rollback: ReturnType<typeof vi.fn>
+} {
+  const queue = [...results]
+  const captured: CapturedTransactionRequest[] = []
+  const begin = vi.fn().mockResolvedValue(undefined)
+  const commit = vi.fn().mockResolvedValue(undefined)
+  const rollback = vi.fn().mockResolvedValue(undefined)
+  const transaction = {
+    begin,
+    commit,
+    rollback,
+    request: vi.fn(() => {
+      const current: CapturedTransactionRequest = { inputs: [], sql: '' }
+      captured.push(current)
+      const request = {
+        input: vi.fn((name: string, type: unknown, value: unknown) => {
+          current.inputs.push({ name, type, value })
+          return request
+        }),
+        query: vi.fn(async (sql: string) => {
+          current.sql = sql
+          const result = queue.shift()
+          if (!result) throw new Error('Missing transaction test result.')
+          return {
+            recordset: result.recordset ?? [],
+            rowsAffected: result.rowsAffected ?? [],
+          }
+        }),
+      }
+      return request
+    }),
+  }
+  const pool = {
+    transaction: vi.fn(() => transaction),
+    request: vi.fn(() => ({
+      input: vi.fn().mockReturnThis(),
+      query: vi.fn().mockResolvedValue({ recordset: [] }),
+    })),
+  } as unknown as ConnectionPool
+  return { pool, captured, begin, commit, rollback }
+}
+
 describe('Orders list query', () => {
   it('builds a parameterized WHERE for every supplied filter and orders newest-first', async () => {
     const { pool, captured } = capturingPool([
@@ -67,6 +135,7 @@ describe('Orders list query', () => {
         Client_Name: 'ITQB Noval',
         ID_Area: 'BDAL',
         ID_Tipo: 'INSTR',
+        Tipo_Warranty: 1,
         ID_Produto: 2,
         ID_Instrumento: 1,
         Sell_Price: 12500,
@@ -76,19 +145,23 @@ describe('Orders list query', () => {
       },
     ])
 
-    await fetchOrderSummaries(pool, {
-      dateFrom: '2026-01-01',
-      dateTo: '2026-01-31',
-      clientName: 'ITQB',
-      orderFactory: true,
-      negocioFechado: true,
-      idTpOrder: ['C'],
-      idArea: ['BDAL'],
-      idTipo: ['INSTR'],
-      idProduto: [2],
-      idInstrumento: [1],
-      encomendaCliPHC: 'PHC',
-    }, 200)
+    await fetchOrderSummaries(
+      pool,
+      {
+        dateFrom: '2026-01-01',
+        dateTo: '2026-01-31',
+        clientName: 'ITQB',
+        orderFactory: true,
+        negocioFechado: true,
+        idTpOrder: ['C'],
+        idArea: ['BDAL'],
+        idTipo: ['INSTR'],
+        idProduto: [2],
+        idInstrumento: [1],
+        encomendaCliPHC: 'PHC',
+      },
+      200,
+    )
 
     // Half-open upper bound: dateTo uses DATEADD, never <=.
     expect(captured.sql).toContain('DT_Order >= @dateFrom')
@@ -109,7 +182,11 @@ describe('Orders list query', () => {
     expect(captured.sql).toContain('Provisoria')
 
     const input = (name: string) => captured.inputs.find((entry) => entry.name === name)
-    expect(input('dateFrom')).toEqual({ name: 'dateFrom', type: mssql.NVarChar, value: '2026-01-01' })
+    expect(input('dateFrom')).toEqual({
+      name: 'dateFrom',
+      type: mssql.NVarChar,
+      value: '2026-01-01',
+    })
     expect(input('dateTo')).toEqual({ name: 'dateTo', type: mssql.NVarChar, value: '2026-01-31' })
     expect(input('clientName')).toEqual({
       name: 'clientName',
@@ -212,6 +289,7 @@ describe('Order detail query', () => {
         Client_Name: 'ITQB Noval',
         ID_Area: 'BDAL',
         ID_Tipo: 'INSTR',
+        Tipo_Warranty: 1,
         ID_Produto: 2,
         ID_Instrumento: 1,
         Orc_Proposta: 12000,
@@ -239,6 +317,8 @@ describe('Order detail query', () => {
 
     expect(captured.sql).toContain('FROM [dbo].[Order] AS o')
     expect(captured.sql).toContain('LEFT JOIN [dbo].[Client] AS c ON o.ID_Client = c.ID_Cliente')
+    expect(captured.sql).toContain('LEFT JOIN [dbo].[Tipo] AS t ON o.ID_Tipo = t.ID_Tipo')
+    expect(captured.sql).toContain('t.Warranty AS Tipo_Warranty')
     // Provisoria is resolved via a LEFT JOIN to V_Order_List (keyed by ID_Order).
     expect(captured.sql).toContain('LEFT JOIN [dbo].[V_Order_List] AS v ON v.ID_Order = o.ID_Order')
     expect(captured.sql).toContain('v.Provisoria AS Provisoria')
@@ -248,6 +328,7 @@ describe('Order detail query', () => {
     expect(order?.Client_Name).toBe('ITQB Noval')
     expect(order?.Contacto).toBe('João')
     expect(order?.ID_Tp_Warranty).toBe(2)
+    expect(order?.Tipo_Warranty).toBe(true)
     // Provisoria bit coerced to boolean; Orc_Proposta is nvarchar, exposed as a string.
     expect(order?.Provisoria).toBe(true)
     expect(typeof order?.Orc_Proposta).toBe('string')
@@ -270,6 +351,7 @@ describe('Order detail query', () => {
         Client_Name: 'ITQB Noval',
         ID_Area: 'BDAL',
         ID_Tipo: 'INSTR',
+        Tipo_Warranty: 1,
         ID_Produto: 2,
         ID_Instrumento: 1,
         Orc_Proposta: 12000,
@@ -359,21 +441,35 @@ describe('Order update', () => {
   ]
 
   it('builds a parameterized UPDATE from the whitelist and stamps ID_User/DT_User', async () => {
-    const { pool, captured } = updatePool(1, detailRecordset)
+    const { pool, captured } = transactionPool(
+      { rowsAffected: [1] },
+      {
+        recordset: [
+          {
+            Sell_Price: 9_999,
+            Warranty_Reserve: 500,
+            Tipo_Warranty: true,
+          },
+        ],
+      },
+      { recordset: [] },
+      { recordset: [] },
+    )
     await updateOrder(pool, 1, { Obs: 'changed', Sell_Price: 9999, user: 'arocha' })
 
-    expect(captured.sql).toContain('UPDATE [dbo].[Order]')
+    const updateRequest = captured[0]
+    expect(updateRequest?.sql).toContain('UPDATE [dbo].[Order]')
     // Columns appear in whitelist order (Sell_Price precedes Obs), so the SET clause is
     // `SET Sell_Price = @Sell_Price, Obs = @Obs, …` — assert each assignment, not a prefix.
-    expect(captured.sql).toContain('Obs = @Obs')
-    expect(captured.sql).toContain('Sell_Price = @Sell_Price')
-    expect(captured.sql).toContain('ID_User = @user')
-    expect(captured.sql).toContain('DT_User = GETUTCDATE()')
-    expect(captured.sql).toContain('WHERE ID_Order = @id')
+    expect(updateRequest?.sql).toContain('Obs = @Obs')
+    expect(updateRequest?.sql).toContain('Sell_Price = @Sell_Price')
+    expect(updateRequest?.sql).toContain('ID_User = @user')
+    expect(updateRequest?.sql).toContain('DT_User = GETUTCDATE()')
+    expect(updateRequest?.sql).toContain('WHERE ID_Order = @id')
     // Only the columns present in the patch are bound (plus id and user).
-    expect(captured.sql).not.toContain('Kit = @Kit')
+    expect(updateRequest?.sql).not.toContain('Kit = @Kit')
 
-    const input = (name: string) => captured.inputs.find((entry) => entry.name === name)
+    const input = (name: string) => updateRequest?.inputs.find((entry) => entry.name === name)
     expect(input('id')).toEqual({ name: 'id', type: mssql.Int, value: 1 })
     expect(input('user')).toEqual({ name: 'user', type: mssql.NVarChar, value: 'arocha' })
     expect(input('Obs')).toEqual({ name: 'Obs', type: mssql.NVarChar, value: 'changed' })
@@ -390,6 +486,78 @@ describe('Order update', () => {
   it('returns null when the UPDATE affects zero rows (id not found)', async () => {
     const { pool } = updatePool(0, detailRecordset)
     await expect(updateOrder(pool, 999, { Obs: 'changed', user: 'arocha' })).resolves.toBeNull()
+  })
+
+  it('rolls back when Sell Price is reduced below the existing recognized total', async () => {
+    const { pool, commit, rollback } = transactionPool(
+      { rowsAffected: [1] },
+      {
+        recordset: [
+          {
+            Sell_Price: 100_000,
+            Warranty_Reserve: 6_600,
+            Tipo_Warranty: true,
+          },
+        ],
+      },
+      {
+        recordset: [
+          { ID_Tp_Reconhecimento: 'T', Valor_Reconhecimento: 125_400 },
+          { ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: 6_600 },
+        ],
+      },
+    )
+
+    await expect(
+      updateOrder(pool, 1, { Sell_Price: 100_000, user: 'arocha' }),
+    ).rejects.toThrow(RecognitionCapacityError)
+    expect(commit).not.toHaveBeenCalled()
+    expect(rollback).toHaveBeenCalledOnce()
+  })
+
+  it('rolls back when Sell Price is reduced below the existing net invoiced total', async () => {
+    const { pool, commit, rollback } = transactionPool(
+      { rowsAffected: [1] },
+      {
+        recordset: [
+          {
+            Sell_Price: 120_000,
+            Warranty_Reserve: 6_600,
+            Tipo_Warranty: true,
+          },
+        ],
+      },
+      { recordset: [] },
+      { recordset: [{ Valor_Doc_FT: 129_000 }] },
+    )
+
+    await expect(
+      updateOrder(pool, 1, { Sell_Price: 120_000, user: 'arocha' }),
+    ).rejects.toThrow(FacturacaoCapacityError)
+    expect(commit).not.toHaveBeenCalled()
+    expect(rollback).toHaveBeenCalledOnce()
+  })
+
+  it('rolls back when Warranty Reserve is reduced below existing W/WP recognition', async () => {
+    const { pool, commit, rollback } = transactionPool(
+      { rowsAffected: [1] },
+      {
+        recordset: [
+          {
+            Sell_Price: 132_000,
+            Warranty_Reserve: 5_000,
+            Tipo_Warranty: true,
+          },
+        ],
+      },
+      { recordset: [{ ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: 6_600 }] },
+    )
+
+    await expect(
+      updateOrder(pool, 1, { Warranty_Reserve: 5_000, user: 'arocha' }),
+    ).rejects.toThrow(RecognitionCapacityError)
+    expect(commit).not.toHaveBeenCalled()
+    expect(rollback).toHaveBeenCalledOnce()
   })
 })
 
@@ -431,6 +599,322 @@ describe('Caracterização lock policy', () => {
     expect(isLockedCaracterizacaoField('Obs')).toBe(false)
     expect(isLockedCaracterizacaoField('Negocio_Fechado')).toBe(false)
     expect(isLockedCaracterizacaoField('Kit')).toBe(false)
+  })
+})
+
+describe('Recognition mutations', () => {
+  const current = {
+    ID_Reconhecimento: 7,
+    ID_Order: 101,
+    ID_Tp_Reconhecimento: 'P',
+    DT_Reconhecimento: '2026-08-01T00:00:00Z',
+    Valor_Reconhecimento: 50,
+    ID_User: 'old-user',
+    DT_User: '2026-08-01T00:00:00Z',
+  }
+
+  it('adds a row atomically and accepts the exact total and instrument limits', async () => {
+    const inserted = { ...current, Valor_Reconhecimento: 200, ID_User: 'editor' }
+    const { pool, captured, commit } = transactionPool(
+      { recordset: [{ Sell_Price: 1000, Warranty_Reserve: 100, Tipo_Warranty: true }] },
+      {
+        recordset: [
+          { ID_Tp_Reconhecimento: 'P', Valor_Reconhecimento: 700 },
+          { ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: 100 },
+        ],
+      },
+      { recordset: [inserted], rowsAffected: [1] },
+    )
+
+    await expect(
+      addReconhecimento(
+        pool,
+        {
+          ID_Order: 101,
+          ID_Tp_Reconhecimento: 'P',
+          DT_Reconhecimento: '2026-09-01',
+          Valor_Reconhecimento: 200,
+        },
+        'editor',
+      ),
+    ).resolves.toMatchObject({ ID_Reconhecimento: 7, Valor_Reconhecimento: 200 })
+    expect(captured[0]?.sql).toContain('UPDLOCK, HOLDLOCK')
+    expect(captured[2]?.sql).toContain('OUTPUT INSERTED.ID_Reconhecimento')
+    expect(commit).toHaveBeenCalledOnce()
+  })
+
+  it('updates a row atomically, excludes its old value, and accepts the exact bucket limit', async () => {
+    const updated = { ...current, Valor_Reconhecimento: 200, ID_User: 'editor' }
+    const { pool, captured, commit, rollback } = transactionPool(
+      { recordset: [{ ID_Order: 101 }] },
+      { recordset: [{ Sell_Price: 1000, Warranty_Reserve: 100, Tipo_Warranty: true }] },
+      { recordset: [current] },
+      {
+        recordset: [
+          { ID_Tp_Reconhecimento: 'P', Valor_Reconhecimento: 700 },
+          { ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: 100 },
+        ],
+      },
+      { recordset: [updated], rowsAffected: [1] },
+    )
+
+    await expect(
+      updateReconhecimento(pool, 7, { Valor_Reconhecimento: 200 }, 'editor'),
+    ).resolves.toMatchObject({ ID_Reconhecimento: 7, Valor_Reconhecimento: 200 })
+
+    expect(commit).toHaveBeenCalledOnce()
+    expect(rollback).not.toHaveBeenCalled()
+    expect(captured.some((entry) => entry.sql.includes('UPDLOCK, HOLDLOCK'))).toBe(true)
+    expect(captured.at(-1)?.sql).toContain('UPDATE [dbo].[Reconhecimento]')
+    expect(captured.at(-1)?.sql).toContain('OUTPUT INSERTED.ID_Reconhecimento')
+  })
+
+  it('rolls back when an edit would exceed the instrument bucket', async () => {
+    const { pool, captured, commit, rollback } = transactionPool(
+      { recordset: [{ ID_Order: 101 }] },
+      { recordset: [{ Sell_Price: 1000, Warranty_Reserve: 100, Tipo_Warranty: true }] },
+      { recordset: [current] },
+      {
+        recordset: [
+          { ID_Tp_Reconhecimento: 'P', Valor_Reconhecimento: 850 },
+          { ID_Tp_Reconhecimento: 'WP', Valor_Reconhecimento: 100 },
+        ],
+      },
+    )
+
+    await expect(
+      updateReconhecimento(pool, 7, { Valor_Reconhecimento: 100 }, 'editor'),
+    ).rejects.toBeInstanceOf(RecognitionCapacityError)
+    expect(commit).not.toHaveBeenCalled()
+    expect(rollback).toHaveBeenCalledOnce()
+    expect(captured.every((entry) => !entry.sql.includes('UPDATE [dbo].[Reconhecimento]'))).toBe(
+      true,
+    )
+  })
+
+  it('hard-deletes by primary key and reports whether a row existed', async () => {
+    const found = poolReturning({ recordset: [], rowsAffected: [1] })
+    const missing = poolReturning({ recordset: [], rowsAffected: [0] })
+
+    await expect(deleteReconhecimento(found, 7)).resolves.toBe(true)
+    await expect(deleteReconhecimento(missing, 999)).resolves.toBe(false)
+  })
+
+  it('propagates a two-year warranty into 12 monthly WP rows from start + 12 months', async () => {
+    const inserted = Array.from({ length: 12 }, (_, index) => ({
+      ...current,
+      ID_Reconhecimento: 100 + index,
+      ID_Tp_Reconhecimento: 'WP',
+      DT_Reconhecimento: new Date(Date.UTC(2026, 4 + index, 1)),
+      Valor_Reconhecimento: 10,
+    }))
+    const { pool, captured, commit } = transactionPool(
+      {
+        recordset: [
+          {
+            ID_Order: 101,
+            ID_Tipo: 'INSTR',
+            Tipo_Warranty: 1,
+            Sell_Price: 1000,
+            Warranty_Reserve: 120,
+            Warranty_DT_Inicio: new Date('2025-05-08T00:00:00Z'),
+            N_Anos: 2,
+          },
+        ],
+      },
+      { recordset: [] },
+      { recordset: inserted, rowsAffected: [12] },
+    )
+
+    const rows = await propagateReconhecimento(pool, { orderId: 101, kind: 'warranty' }, 'editor')
+
+    expect(rows).toHaveLength(12)
+    expect(rows[0]).toMatchObject({
+      ID_Tp_Reconhecimento: 'WP',
+      DT_Reconhecimento: '2026-05-01T00:00:00.000Z',
+      Valor_Reconhecimento: 10,
+    })
+    expect(rows[11]?.DT_Reconhecimento).toBe('2027-04-01T00:00:00.000Z')
+    expect(captured[0]?.sql).toContain('LEFT JOIN [dbo].[Tipo]')
+    expect(captured[0]?.sql).toContain('LEFT JOIN [dbo].[Tp_Warranty]')
+    expect(captured[2]?.sql).toContain('INSERT INTO [dbo].[Reconhecimento]')
+    expect(commit).toHaveBeenCalledOnce()
+  })
+
+  it('binds propagated values at SQL money four-decimal precision', async () => {
+    const inserted = Array.from({ length: 12 }, (_, index) => ({
+      ...current,
+      ID_Reconhecimento: 300 + index,
+      ID_Tp_Reconhecimento: 'WP',
+      DT_Reconhecimento: new Date(Date.UTC(2026, index, 1)),
+      Valor_Reconhecimento: 0,
+    }))
+    const { pool, captured } = transactionPool(
+      {
+        recordset: [{
+          ID_Order: 101,
+          ID_Tipo: 'INSTR',
+          Tipo_Warranty: 1,
+          Sell_Price: 100.0001,
+          Warranty_Reserve: 100.0001,
+          Warranty_DT_Inicio: new Date('2025-01-08T00:00:00Z'),
+          N_Anos: 2,
+        }],
+      },
+      { recordset: [] },
+      { recordset: inserted, rowsAffected: [12] },
+    )
+
+    await propagateReconhecimento(pool, { orderId: 101, kind: 'warranty' }, 'editor')
+
+    const values = captured[2]?.inputs
+      .filter((input) => input.name.startsWith('value'))
+      .map((input) => input.value)
+    expect(values).toEqual([
+      8.3334, 8.3334, 8.3334, 8.3334, 8.3334,
+      8.3333, 8.3333, 8.3333, 8.3333, 8.3333, 8.3333, 8.3333,
+    ])
+  })
+
+  it('rolls back propagation before insert when existing rows consume the bucket', async () => {
+    const { pool, captured, commit, rollback } = transactionPool(
+      {
+        recordset: [
+          {
+            ID_Order: 101,
+            ID_Tipo: 'INSTR',
+            Tipo_Warranty: 1,
+            Sell_Price: 1000,
+            Warranty_Reserve: 120,
+            Warranty_DT_Inicio: new Date('2025-05-08T00:00:00Z'),
+            N_Anos: 2,
+          },
+        ],
+      },
+      { recordset: [{ ID_Tp_Reconhecimento: 'W', Valor_Reconhecimento: 1 }] },
+    )
+
+    await expect(
+      propagateReconhecimento(pool, { orderId: 101, kind: 'warranty' }, 'editor'),
+    ).rejects.toBeInstanceOf(RecognitionCapacityError)
+    expect(commit).not.toHaveBeenCalled()
+    expect(rollback).toHaveBeenCalledOnce()
+    expect(captured).toHaveLength(2)
+  })
+
+  it('generates maintenance rows from the selected contract start and duration', async () => {
+    const inserted = Array.from({ length: 24 }, (_, index) => ({
+      ...current,
+      ID_Reconhecimento: 200 + index,
+      ID_Tp_Reconhecimento: 'CM',
+      DT_Reconhecimento: new Date(Date.UTC(2027, 1 + index, 1)),
+      Valor_Reconhecimento: 50,
+    }))
+    const { pool } = transactionPool(
+      {
+        recordset: [
+          {
+            ID_Order: 101,
+            ID_Tipo: 'CM',
+            Tipo_Warranty: 0,
+            Sell_Price: 1200,
+            Warranty_Reserve: null,
+            Warranty_DT_Inicio: null,
+            N_Anos: null,
+          },
+        ],
+      },
+      { recordset: [] },
+      { recordset: inserted, rowsAffected: [24] },
+    )
+
+    const rows = await propagateReconhecimento(
+      pool,
+      { orderId: 101, kind: 'maintenance', startDate: '2027-02-18', years: 2 },
+      'editor',
+    )
+    expect(rows).toHaveLength(24)
+    expect(rows[0]).toMatchObject({
+      ID_Tp_Reconhecimento: 'CM',
+      DT_Reconhecimento: '2027-02-01T00:00:00.000Z',
+      Valor_Reconhecimento: 50,
+    })
+  })
+})
+
+describe('Invoicing mutations', () => {
+  const current = {
+    ID_Facturacao: 3,
+    ID_Order: 101,
+    DT_Doc_FT: '2026-08-01T00:00:00Z',
+    ID_Tp_Doc_FT: 'FT',
+    N_Doc_FT: 'FT 1',
+    Valor_Doc_FT: 500,
+    ID_User: 'old-user',
+    DT_User: '2026-08-01T00:00:00Z',
+  }
+
+  it('reads document types and descriptive labels directly from dbo.Tp_Doc_FT', async () => {
+    const { pool, captured } = capturingPool([
+      { ID_Tp_Doc_FT: 'AcFT', Tp_Doc_FT: 'Acerto Factura' },
+      { ID_Tp_Doc_FT: 'FT', Tp_Doc_FT: 'Factura' },
+      { ID_Tp_Doc_FT: 'NC', Tp_Doc_FT: 'Nota Crédito' },
+    ])
+
+    await expect(fetchFacturacaoTypes(pool)).resolves.toEqual([
+      { id: 'AcFT', label: 'Acerto Factura' },
+      { id: 'FT', label: 'Factura' },
+      { id: 'NC', label: 'Nota Crédito' },
+    ])
+    expect(captured.sql).toContain('FROM [dbo].[Tp_Doc_FT]')
+    expect(captured.sql).toContain('ID_Tp_Doc_FT')
+    expect(captured.sql).toContain('Tp_Doc_FT')
+  })
+
+  it('rejects an added document when net invoiced would exceed Sell Price', async () => {
+    const { pool, captured, commit, rollback } = transactionPool(
+      { recordset: [{ Sell_Price: 1000 }] },
+      { recordset: [{ Valor_Doc_FT: 900 }] },
+    )
+
+    await expect(
+      addFacturacao(
+        pool,
+        {
+          ID_Order: 101,
+          DT_Doc_FT: '2026-09-01',
+          ID_Tp_Doc_FT: 'FT',
+          N_Doc_FT: 'FT 2',
+          Valor_Doc_FT: 200,
+        },
+        'editor',
+      ),
+    ).rejects.toBeInstanceOf(FacturacaoCapacityError)
+    expect(commit).not.toHaveBeenCalled()
+    expect(rollback).toHaveBeenCalledOnce()
+    expect(captured).toHaveLength(2)
+  })
+
+  it('updates a document at the exact net limit while excluding its old value', async () => {
+    const updated = { ...current, Valor_Doc_FT: 400, ID_User: 'editor' }
+    const { pool, captured, commit } = transactionPool(
+      { recordset: [{ ID_Order: 101 }] },
+      { recordset: [{ Sell_Price: 1000 }] },
+      { recordset: [current] },
+      { recordset: [{ Valor_Doc_FT: 600 }] },
+      { recordset: [updated], rowsAffected: [1] },
+    )
+
+    await expect(updateFacturacao(pool, 3, { Valor_Doc_FT: 400 }, 'editor')).resolves.toMatchObject(
+      { ID_Facturacao: 3, Valor_Doc_FT: 400 },
+    )
+    expect(captured.at(-1)?.sql).toContain('UPDATE [dbo].[Facturacao]')
+    expect(commit).toHaveBeenCalledOnce()
+  })
+
+  it('hard-deletes an invoicing document by primary key', async () => {
+    const pool = poolReturning({ recordset: [], rowsAffected: [1] })
+    await expect(deleteFacturacao(pool, 3)).resolves.toBe(true)
   })
 })
 

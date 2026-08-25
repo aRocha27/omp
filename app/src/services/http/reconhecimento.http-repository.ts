@@ -1,22 +1,22 @@
 /**
  * HTTP Reconhecimento repository.
  *
- * Live read implementation of `ReconhecimentoRepository` backed by the Node API
- * sub-table endpoint `GET /orders/reconhecimentos?orderId=N`. The contract carries
- * no credentials — the backend reads through a server-configured managed profile.
- * Failures map to `RepositoryError` so the order-detail Revenue tab renders
- * unchanged.
- *
- * `add` is NOT supported live (the `[+ Reconhecimento]` action is gated to mock
- * mode); live sub-table write is a flagged follow-up.
+ * Live read/write implementation of `ReconhecimentoRepository` backed by the Node
+ * API. The contract carries no database credentials — the backend uses a
+ * server-configured managed profile and independently enforces roles, capacity, and
+ * transaction boundaries. Failures map to `RepositoryError` so the order-detail
+ * Revenue tab handles mock and live failures consistently.
  */
 import { env } from '@/app/configuration/env'
 import type { Reconhecimento } from '@/domain/models/reconhecimento'
 import {
   RepositoryError,
   type NewReconhecimento,
+  type PropagateReconhecimentoInput,
+  type ReconhecimentoPatch,
   type ReconhecimentoRepository,
 } from '@/services/contracts/reconhecimento.repository'
+import type { Role } from '@/domain/models/user'
 
 type Row = Reconhecimento
 
@@ -39,10 +39,43 @@ export class HttpReconhecimentoRepository implements ReconhecimentoRepository {
     return data.rows.map(toReconhecimento)
   }
 
-  async add(entry: NewReconhecimento, role = 'editor'): Promise<Reconhecimento> {
+  async add(entry: NewReconhecimento, role: Role): Promise<Reconhecimento> {
     const data = await postJson<{ ok: true; row: Row } | ApiFailure>('/orders/reconhecimentos', entry, role)
     if (!data.ok) throw toRepositoryError(data, 422)
     return toReconhecimento(data.row)
+  }
+
+  async update(id: number, patch: ReconhecimentoPatch, role: Role): Promise<Reconhecimento> {
+    const data = await postJson<{ ok: true; row: Row } | ApiFailure>(
+      '/orders/reconhecimentos/update',
+      { id, patch },
+      role,
+    )
+    if (!data.ok) throw toRepositoryError(data, 422)
+    return toReconhecimento(data.row)
+  }
+
+  async remove(id: number, role: Role): Promise<void> {
+    const data = await postJson<{ ok: true } | ApiFailure>(
+      '/orders/reconhecimentos/delete',
+      { id },
+      role,
+    )
+    if (!data.ok) throw toRepositoryError(data, 422)
+  }
+
+  async propagate(
+    orderId: number,
+    input: PropagateReconhecimentoInput,
+    role: Role,
+  ): Promise<Reconhecimento[]> {
+    const data = await postJson<{ ok: true; rows: Row[] } | ApiFailure>(
+      '/orders/reconhecimentos/propagate',
+      { orderId, ...input },
+      role,
+    )
+    if (!data.ok) throw toRepositoryError(data, 422)
+    return data.rows.map(toReconhecimento)
   }
 }
 

@@ -1,5 +1,10 @@
 import cors from 'cors'
-import express, { type ErrorRequestHandler, type Express, type Request, type Response } from 'express'
+import express, {
+  type ErrorRequestHandler,
+  type Express,
+  type Request,
+  type Response,
+} from 'express'
 import { adminAuthentication, buildAdminAuthConfig, type AdminAuthConfig } from './auth.js'
 import {
   fetchAllTables,
@@ -8,8 +13,14 @@ import {
   fetchClientById,
   fetchClientSummaries,
   fetchFacturacao,
+  fetchFacturacaoTypes,
   addReconhecimento,
+  updateReconhecimento,
+  deleteReconhecimento,
+  propagateReconhecimento,
   addFacturacao,
+  updateFacturacao,
+  deleteFacturacao,
   fetchOrderById,
   fetchOrderSummaries,
   fetchReconhecimentos,
@@ -48,8 +59,14 @@ export function buildDefaultDependencies(environment: Environment = process.env)
     createOrder,
     fetchReconhecimentos,
     fetchFacturacao,
+    fetchFacturacaoTypes,
     addReconhecimento,
+    updateReconhecimento,
+    deleteReconhecimento,
+    propagateReconhecimento,
     addFacturacao,
+    updateFacturacao,
+    deleteFacturacao,
     fetchClientSummaries,
     fetchClientById,
   }
@@ -67,7 +84,9 @@ export function createApp(
   app.use('/api', adminAuthentication(authConfig))
   app.use(express.json({ limit: '32kb' }))
   app.use(createAdminRouter(dependencies))
-  app.use(createOrdersRouter(dependencies))
+  app.use(createOrdersRouter(dependencies, {
+    authenticatedAdmin: authConfig.token !== null,
+  }))
   app.use(createClientsRouter(dependencies))
   app.use(errorHandler)
 

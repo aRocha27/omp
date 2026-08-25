@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -8,28 +8,42 @@ import {
   FileText,
   Lock,
   Mail,
+  Pencil,
   Plus,
   Receipt,
-  ShoppingCart,
   ShieldAlert,
   ShieldCheck,
+  ShoppingCart,
+  Sparkles,
   TrendingUp,
+  Trash2,
   type LucideIcon,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOrder } from '@/features/orders/api/use-order'
 import { useUpdateOrder } from '@/features/orders/api/use-update-order'
 import { useReconhecimentos } from '@/features/orders/api/use-reconhecimentos'
-import { useDocumentoFaturacao } from '@/features/orders/api/use-documento-faturacao'
+import {
+  useDocumentoFaturacao,
+  useDocumentoFaturacaoTypes,
+} from '@/features/orders/api/use-documento-faturacao'
+import { useUpdateReconhecimento } from '@/features/orders/api/use-update-reconhecimento'
+import { useDeleteReconhecimento } from '@/features/orders/api/use-delete-reconhecimento'
+import { usePropagateReconhecimento } from '@/features/orders/api/use-propagate-reconhecimento'
+import { useUpdateDocumentoFaturacao } from '@/features/orders/api/use-update-documento-faturacao'
+import { useDeleteDocumentoFaturacao } from '@/features/orders/api/use-delete-documento-faturacao'
 import { useCurrentUser, useRoleSwitcher } from '@/app/providers/user-provider'
 import { useRepositories } from '@/app/providers/repository-provider'
 import { resolveClientName } from '@/fixtures/orders'
 import { formatOrderDate, formatPrice } from '@/utils/format'
+import { recognitionTotals, reconhecimentoEstado } from '@/domain/rules/recognition'
+import { planMaintenancePropagation, planWarrantyPropagation } from '@/domain/rules/propagation'
 import type { Order } from '@/domain/models/order'
 import type { OrderUpdatePatch } from '@/services/contracts/orders.repository'
 import type { RoleLike } from '@/domain/models/user'
 import type { Reconhecimento } from '@/domain/models/reconhecimento'
 import type { DocumentoFaturacao } from '@/domain/models/documento-faturacao'
+import type { DocumentoFaturacaoType } from '@/services/contracts/documento-faturacao.repository'
 import {
   canEditField,
   isHistorico,
@@ -47,7 +61,7 @@ import {
   warrantyTypes,
   type ReferenceOption,
 } from '@/fixtures/reference-data'
-import { reconhecimentoLabel, docFtLabel } from '@/features/orders/components/reference-labels'
+import { reconhecimentoLabel } from '@/features/orders/components/reference-labels'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { LoadingBlock } from '@/components/ui/spinner'
@@ -200,22 +214,30 @@ const TONE_CHIP: Record<MetricTone, string> = {
 }
 
 /** A read-only KPI card: icon chip + label + value. The label is its own span so
- *  `getByText('Sell Price')` resolves to exactly this element. */
+ *  `getByText('Sell Price')` resolves to exactly this element. `highlight` paints a
+ *  green background when the metric has reached its target (req 6). */
 function MetricCard({
   tone,
   icon: Icon,
   label,
   value,
   tag,
+  highlight,
 }: {
   tone: MetricTone
   icon: LucideIcon
   label: string
   value: ReactNode
   tag?: string
+  highlight?: boolean
 }) {
   return (
-    <div className="flex min-h-[66px] items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2.5">
+    <div
+      data-highlight={highlight ? 'true' : undefined}
+      className={`flex min-h-[66px] items-center gap-2.5 rounded-lg border px-3 py-2.5 ${
+        highlight ? 'border-success/40 bg-success/15' : 'border-border bg-surface'
+      }`}
+    >
       <span className={`grid size-8 shrink-0 place-items-center rounded-lg ${TONE_CHIP[tone]}`}>
         <Icon className="size-4" aria-hidden />
       </span>
@@ -251,7 +273,9 @@ function SectionCard({
   className?: string
 }) {
   return (
-    <section className={`overflow-hidden rounded-lg border border-border bg-surface shadow-sm ${className ?? ''}`}>
+    <section
+      className={`overflow-hidden rounded-lg border border-border bg-surface shadow-sm ${className ?? ''}`}
+    >
       {title && (
         <div className="flex h-9 items-center justify-between border-b border-border px-2.5 text-[11px] font-extrabold text-foreground/80">
           <span>{title}</span>
@@ -467,7 +491,9 @@ function BillingFieldEditable({
 function BillingField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-h-[58px] rounded-md border border-border bg-surface-muted p-2.5">
-      <span className="block text-[9px] uppercase tracking-wide text-foreground-muted">{label}</span>
+      <span className="block text-[9px] uppercase tracking-wide text-foreground-muted">
+        {label}
+      </span>
       <span className="mt-1 block text-[11px] font-medium text-foreground">{children}</span>
     </div>
   )
@@ -478,73 +504,321 @@ function BillingField({ label, children }: { label: string; children: ReactNode 
 /* ────────────────────────────────────────────────────────────────────────── */
 
 function ReconhecimentosSection({
-  orderId,
+  order,
   rows,
   role,
-  sellPrice,
-  warrantyReserve,
+  queryError,
 }: {
-  orderId: number
+  order: Order
   rows: Reconhecimento[]
   role: RoleLike
-  sellPrice: number | null
-  warrantyReserve: number | null
+  queryError: string | null
 }) {
+  const orderId = order.ID_Order
+  const sellPrice = order.Sell_Price
+  const warrantyReserve = order.Tipo_Warranty === true ? order.Warranty_Reserve : 0
   const { reconhecimentos } = useRepositories()
   const queryClient = useQueryClient()
   const user = useCurrentUser()
+  const updateMutation = useUpdateReconhecimento(orderId)
+  const deleteMutation = useDeleteReconhecimento(orderId)
+  const propagateMutation = usePropagateReconhecimento(orderId)
+
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState({ type: 'P', date: new Date().toISOString().slice(0, 10), value: '' })
+  const [form, setForm] = useState({
+    type: 'P',
+    date: new Date().toISOString().slice(0, 10),
+    value: '',
+  })
+
+  // Inline row editing.
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState({ type: 'P', date: '', value: '' })
+
+  // Maintenance-contract propagation dialog.
+  const [contractOpen, setContractOpen] = useState(false)
+  const [contractForm, setContractForm] = useState({
+    startDate: new Date().toISOString().slice(0, 10),
+    years: '1',
+  })
 
   const canAdd = role !== 'viewer'
-  const isWarranty = form.type === 'W' || form.type === 'WP'
-  const alreadyRecognized = rows
-    .filter((row) => (row.ID_Tp_Reconhecimento === 'W' || row.ID_Tp_Reconhecimento === 'WP') === isWarranty)
-    .reduce((sum, row) => sum + (row.Valor_Reconhecimento ?? 0), 0)
-  const capacity = Math.max(
-    0,
-    (isWarranty ? warrantyReserve ?? 0 : (sellPrice ?? 0) - (warrantyReserve ?? 0)) - alreadyRecognized,
-  )
+
+  /** Remaining capacity in a recognition bucket, optionally excluding one row
+   *  (the row being edited). Warranty codes W/WP draw from the Warranty_Reserve
+   *  bucket; everything else draws from the instrument bucket
+   *  (Sell_Price − Warranty_Reserve). Both clamp at 0 and never exceed Sell_Price
+   *  in total, so req 5's "≤ Sell Price" holds. */
+  function bucketCapacity(typeCode: string, excludeId: number | null = null): number {
+    const isWarranty = typeCode === 'W' || typeCode === 'WP'
+    const already = rows
+      .filter((row) => row.ID_Reconhecimento !== excludeId)
+      .filter(
+        (row) =>
+          (row.ID_Tp_Reconhecimento === 'W' || row.ID_Tp_Reconhecimento === 'WP') === isWarranty,
+      )
+      .reduce((sum, row) => sum + (row.Valor_Reconhecimento ?? 0), 0)
+    const bucket = isWarranty ? (warrantyReserve ?? 0) : (sellPrice ?? 0) - (warrantyReserve ?? 0)
+    return Math.max(0, bucket - already)
+  }
+
+  const capacity = bucketCapacity(form.type)
 
   async function handleAdd() {
     setError(null)
     const value = Number(form.value)
     if (!Number.isFinite(value) || value <= 0 || value > capacity + 0.0001) {
-      setError(`Valor inválido. Disponível: ${formatPrice(capacity)}.`)
+      setError(
+        `Valor inválido. Disponível: ${formatPrice(capacity)}. O total reconhecido não pode ultrapassar o Sell Price.`,
+      )
       return
     }
     setSaving(true)
     try {
-      await reconhecimentos.add({
-        ID_Order: orderId,
-        ID_Tp_Reconhecimento: form.type || null,
-        DT_Reconhecimento: form.date ? new Date(form.date).toISOString() : null,
-        Valor_Reconhecimento: form.value === '' ? null : Number(form.value),
-        ID_User: String(user.ID_User),
-      }, role)
-      await queryClient.invalidateQueries({ queryKey: ['orders', 'reconhecimentos', orderId] })
+      const created = await reconhecimentos.add(
+        {
+          ID_Order: orderId,
+          ID_Tp_Reconhecimento: form.type,
+          DT_Reconhecimento: new Date(form.date).toISOString(),
+          Valor_Reconhecimento: value,
+          ID_User: String(user.ID_User),
+        },
+        role,
+      )
+      // Reflect the new row instantly; the order's `Reconhecido` flag is
+      // recomputed server-side, so refresh the detail/list in the background.
+      // The recognition list is invalidated too so the server re-sorts it by
+      // `DT_Reconhecimento` (the appended row may land out of order); the cached
+      // rows stay on screen during the refetch, so there is no flash.
+      queryClient.setQueryData<Reconhecimento[]>(['orders', 'reconhecimentos', orderId], (old) => [
+        ...(old ?? []),
+        created,
+      ])
+      queryClient.invalidateQueries({ queryKey: ['orders', 'reconhecimentos', orderId] })
+      queryClient.invalidateQueries({ queryKey: ['orders', 'detail', orderId] })
+      queryClient.invalidateQueries({ queryKey: ['orders', 'list'] })
       setAdding(false)
       setForm({ type: 'P', date: new Date().toISOString().slice(0, 10), value: '' })
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Não foi possível adicionar o reconhecimento.')
+      setError(
+        reason instanceof Error ? reason.message : 'Não foi possível adicionar o reconhecimento.',
+      )
     } finally {
       setSaving(false)
     }
   }
 
+  function startEditRow(r: Reconhecimento) {
+    setEditingId(r.ID_Reconhecimento)
+    setEditForm({
+      type: r.ID_Tp_Reconhecimento ?? 'P',
+      date: r.DT_Reconhecimento ? r.DT_Reconhecimento.slice(0, 10) : '',
+      value: r.Valor_Reconhecimento == null ? '' : String(r.Valor_Reconhecimento),
+    })
+    setError(null)
+  }
+
+  function saveEditRow(r: Reconhecimento) {
+    const value = Number(editForm.value)
+    const cap = bucketCapacity(editForm.type, r.ID_Reconhecimento)
+    if (!Number.isFinite(value) || value <= 0 || value > cap + 0.0001) {
+      setError(
+        `Valor inválido. Disponível: ${formatPrice(cap)}. O total reconhecido não pode ultrapassar o Sell Price.`,
+      )
+      return
+    }
+    updateMutation.mutate(
+      {
+        id: r.ID_Reconhecimento,
+        patch: {
+          ID_Tp_Reconhecimento: editForm.type || null,
+          DT_Reconhecimento: editForm.date ? new Date(editForm.date).toISOString() : null,
+          Valor_Reconhecimento: editForm.value === '' ? null : Number(editForm.value),
+        },
+      },
+      {
+        onSuccess: () => setEditingId(null),
+        onError: (e) =>
+          setError(e instanceof Error ? e.message : 'Não foi possível guardar o reconhecimento.'),
+      },
+    )
+  }
+
+  function handleDelete(r: Reconhecimento) {
+    if (!window.confirm(`Apagar este reconhecimento de ${formatPrice(r.Valor_Reconhecimento)}?`))
+      return
+    deleteMutation.mutate(
+      { id: r.ID_Reconhecimento },
+      {
+        onError: (e) =>
+          setError(e instanceof Error ? e.message : 'Não foi possível apagar o reconhecimento.'),
+      },
+    )
+  }
+
+  // Propagation availability + preview (req 10 & 12). The math lives in pure
+  // domain functions so it stays identical in mock and HTTP repos.
+  const warrantyPlan = planWarrantyPropagation(order)
+  const canPropagateWarranty =
+    order.Tipo_Warranty === true && order.ID_Tp_Warranty != null && warrantyPlan.length > 0
+  const isContract = order.ID_Tipo === 'CM'
+  const contractYears = Number(contractForm.years)
+  const contractYearsValid =
+    Number.isInteger(contractYears) && contractYears >= 1 && contractYears <= 100
+  const contractPlan =
+    isContract && contractOpen && contractYearsValid && contractForm.startDate
+      ? planMaintenancePropagation(order, contractForm.startDate, contractYears)
+      : []
+
+  function handlePropagateWarranty() {
+    const monthly = warrantyPlan[0]?.value ?? 0
+    if (
+      !window.confirm(
+        `Propagar ${warrantyPlan.length} reconhecimentos de garantia (WP) de ${formatPrice(monthly)}/mês, a partir de ${formatOrderDate(
+          warrantyPlan[0]?.date ?? null,
+        )}? Total: ${formatPrice(warrantyPlan.reduce((s, l) => s + l.value, 0))}.`,
+      )
+    )
+      return
+    setError(null)
+    propagateMutation.mutate(
+      { kind: 'warranty' },
+      {
+        onError: (e) =>
+          setError(
+            e instanceof Error
+              ? e.message
+              : 'Não foi possível propagar os reconhecimentos de garantia.',
+          ),
+      },
+    )
+  }
+
+  function handlePropagateContract() {
+    setError(null)
+    const years = Number(contractForm.years)
+    if (!contractForm.startDate || !Number.isInteger(years) || years < 1 || years > 100) {
+      setError('Indique o início do contrato e um nº de anos inteiro entre 1 e 100.')
+      return
+    }
+    const preview = planMaintenancePropagation(order, contractForm.startDate, years)
+    if (
+      !window.confirm(
+        `Propagar ${preview.length} reconhecimentos de manutenção (CM) de ${formatPrice(preview[0]?.value ?? 0)}/mês, a partir de ${formatOrderDate(
+          preview[0]?.date ?? null,
+        )}? Total: ${formatPrice(preview.reduce((s, l) => s + l.value, 0))}.`,
+      )
+    )
+      return
+    propagateMutation.mutate(
+      { kind: 'maintenance', startDate: contractForm.startDate, years },
+      {
+        onSuccess: () => setContractOpen(false),
+        onError: (e) =>
+          setError(
+            e instanceof Error
+              ? e.message
+              : 'Não foi possível propagar os reconhecimentos de manutenção.',
+          ),
+      },
+    )
+  }
+
+  const propagateActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      {canPropagateWarranty && canAdd && (
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={handlePropagateWarranty}
+          disabled={propagateMutation.isPending}
+        >
+          <Sparkles className="size-4" aria-hidden /> Propagar garantia
+        </Button>
+      )}
+      {isContract && canAdd && !contractOpen && (
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => setContractOpen(true)}
+          disabled={propagateMutation.isPending}
+        >
+          <Sparkles className="size-4" aria-hidden /> Propagar contrato
+        </Button>
+      )}
+    </div>
+  )
+
   return (
     <SectionCard
       title="RECONHECIMENTOS"
       action={
-        canAdd && !adding ? (
-          <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
-            <Plus className="size-4" aria-hidden /> Adicionar Reconhecimento
-          </Button>
-        ) : undefined
+        <div className="flex flex-wrap items-center gap-2">
+          {propagateActions}
+          {canAdd && !adding && (
+            <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+              <Plus className="size-4" aria-hidden /> Adicionar Reconhecimento
+            </Button>
+          )}
+        </div>
       }
     >
+      {queryError && (
+        <p
+          role="alert"
+          className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {queryError}
+        </p>
+      )}
+      {contractOpen && (
+        <div className="flex flex-wrap items-end gap-2 border-b border-border bg-surface-muted p-3">
+          <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
+            Início do contrato
+            <Input
+              type="date"
+              aria-label="Início do contrato"
+              value={contractForm.startDate}
+              onChange={(e) => setContractForm((f) => ({ ...f, startDate: e.target.value }))}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
+            Nº de anos
+            <Input
+              type="number"
+              aria-label="Nº de anos do contrato"
+              min="1"
+              max="100"
+              step="1"
+              value={contractForm.years}
+              onChange={(e) => setContractForm((f) => ({ ...f, years: e.target.value }))}
+            />
+          </label>
+          <Button
+            size="sm"
+            onClick={handlePropagateContract}
+            disabled={propagateMutation.isPending}
+          >
+            Propagar
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setContractOpen(false)}
+            disabled={propagateMutation.isPending}
+          >
+            Cancelar
+          </Button>
+          {contractPlan.length > 0 && (
+            <span className="text-[10px] text-foreground/60">
+              {contractPlan.length} linhas de {formatPrice(contractPlan[0].value)}/mês • total{' '}
+              {formatPrice(contractPlan.reduce((s, l) => s + l.value, 0))}
+            </span>
+          )}
+        </div>
+      )}
       {adding && (
         <div className="flex flex-wrap items-end gap-2 border-b border-border bg-surface-muted p-3">
           <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
@@ -590,7 +864,14 @@ function ReconhecimentosSection({
           </Button>
         </div>
       )}
-      {error && <p role="alert" className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
+      {error && (
+        <p
+          role="alert"
+          className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {error}
+        </p>
+      )}
 
       {rows.length === 0 ? (
         <p className="m-3 rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-foreground/50">
@@ -598,35 +879,128 @@ function ReconhecimentosSection({
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border bg-surface-muted text-left text-[10px] uppercase text-foreground-muted">
                 <th className="px-2.5 py-1.5 font-semibold">Tipo</th>
                 <th className="px-2.5 py-1.5 font-semibold">Data do Reconhecimento</th>
                 <th className="px-2.5 py-1.5 text-right font-semibold">Valor</th>
                 <th className="px-2.5 py-1.5 font-semibold">Estado</th>
+                {canAdd && <th className="px-2.5 py-1.5 text-right font-semibold">Ações</th>}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.ID_Reconhecimento} className="border-b border-border/50">
-                  <td className="px-2.5 py-1.5 text-[11px]">
-                    {displayText(reconhecimentoLabel(r.ID_Tp_Reconhecimento))}
-                  </td>
-                  <td className="px-2.5 py-1.5 text-[11px]">
-                    {formatOrderDate(r.DT_Reconhecimento)}
-                  </td>
-                  <td className="px-2.5 py-1.5 text-right text-[11px]">
-                    {formatPrice(r.Valor_Reconhecimento)}
-                  </td>
-                  <td className="px-2.5 py-1.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-[9px] text-foreground/70">
-                      <span className="size-1.5 rounded-full bg-primary" aria-hidden />
-                      Por reconhecer
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((r) => {
+                const estado = reconhecimentoEstado(r)
+                if (editingId === r.ID_Reconhecimento) {
+                  return (
+                    <tr
+                      key={r.ID_Reconhecimento}
+                      className="border-b border-border/50 bg-surface-muted"
+                    >
+                      <td className="px-2.5 py-1.5">
+                        <Select
+                          aria-label="Tipo de reconhecimento"
+                          value={editForm.type}
+                          onChange={(e) => setEditForm((f) => ({ ...f, type: e.target.value }))}
+                        >
+                          {tpReconhecimentos.map((o) => (
+                            <option key={String(o.id)} value={String(o.id)}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="date"
+                          aria-label="Data do reconhecimento"
+                          value={editForm.date}
+                          onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="number"
+                          aria-label="Valor do reconhecimento"
+                          value={editForm.value}
+                          min="0"
+                          step="0.01"
+                          onChange={(e) => setEditForm((f) => ({ ...f, value: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5" />
+                      <td className="px-2.5 py-1.5 text-right">
+                        <Button
+                          size="sm"
+                          onClick={() => saveEditRow(r)}
+                          disabled={updateMutation.isPending}
+                        >
+                          Guardar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEditingId(null)}
+                          disabled={updateMutation.isPending}
+                        >
+                          Cancelar
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                }
+                return (
+                  <tr key={r.ID_Reconhecimento} className="border-b border-border/50">
+                    <td className="px-2.5 py-1.5 text-[11px]">
+                      {displayText(reconhecimentoLabel(r.ID_Tp_Reconhecimento))}
+                    </td>
+                    <td className="px-2.5 py-1.5 text-[11px]">
+                      {formatOrderDate(r.DT_Reconhecimento)}
+                    </td>
+                    <td className="px-2.5 py-1.5 text-right text-[11px]">
+                      {formatPrice(r.Valor_Reconhecimento)}
+                    </td>
+                    <td className="px-2.5 py-1.5">
+                      {estado === 'reconhecido' ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-2 py-0.5 text-[9px] font-semibold text-success">
+                          <span className="size-1.5 rounded-full bg-success" aria-hidden />
+                          Reconhecido
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-foreground/10 px-2 py-0.5 text-[9px] text-foreground/60">
+                          <span className="size-1.5 rounded-full bg-foreground/40" aria-hidden />
+                          Por reconhecer
+                        </span>
+                      )}
+                    </td>
+                    {canAdd && (
+                      <td className="px-2.5 py-1.5 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Editar linha de reconhecimento ${r.ID_Reconhecimento}`}
+                            onClick={() => startEditRow(r)}
+                            disabled={updateMutation.isPending || deleteMutation.isPending}
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Apagar linha de reconhecimento ${r.ID_Reconhecimento}`}
+                            onClick={() => handleDelete(r)}
+                            disabled={updateMutation.isPending || deleteMutation.isPending}
+                          >
+                            <Trash2 className="size-3.5" aria-hidden />
+                          </Button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -635,73 +1009,397 @@ function ReconhecimentosSection({
   )
 }
 
-function DocumentosTable({ rows, orderId, role }: { rows: DocumentoFaturacao[]; orderId?: number; role?: RoleLike }) {
+function DocumentosTable({
+  order,
+  rows,
+  role,
+  documentTypes,
+  documentTypesPending,
+  documentTypesError,
+  queryError,
+}: {
+  order: Order
+  rows: DocumentoFaturacao[]
+  role: RoleLike
+  documentTypes: readonly DocumentoFaturacaoType[]
+  documentTypesPending: boolean
+  documentTypesError: string | null
+  queryError: string | null
+}) {
+  const orderId = order.ID_Order
+  const sellPrice = order.Sell_Price
   const { facturacao } = useRepositories()
   const user = useCurrentUser()
   const queryClient = useQueryClient()
+  const updateMutation = useUpdateDocumentoFaturacao(orderId)
+  const deleteMutation = useDeleteDocumentoFaturacao(orderId)
+
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), type: 'FT', number: '', value: '' })
+  const [form, setForm] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    type: '',
+    number: '',
+    value: '',
+  })
+
+  // Inline row editing.
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState({ date: '', type: '', number: '', value: '' })
+
+  const defaultDocumentType =
+    documentTypes.find((type) => type.id === 'FT')?.id ?? documentTypes[0]?.id ?? ''
+  const documentTypeLabels = useMemo(
+    () => new Map(documentTypes.map((type) => [type.id, type.label])),
+    [documentTypes],
+  )
+
+  const canAdd = role !== 'viewer'
   const netInvoiced = rows.reduce((sum, d) => sum + (d.Valor_Doc_FT ?? 0), 0)
-  const canAdd = orderId !== undefined && role !== 'viewer'
-  async function handleAdd() {
-    if (!orderId || !form.number || form.value === '') return
-    setSaving(true); setError(null)
-    try {
-      await facturacao.add({ ID_Order: orderId, DT_Doc_FT: new Date(form.date).toISOString(), ID_Tp_Doc_FT: form.type, N_Doc_FT: form.number, Valor_Doc_FT: Number(form.value), ID_User: String(user.ID_User) }, role)
-      await queryClient.invalidateQueries({ queryKey: ['orders', 'facturacao', orderId] })
-      setAdding(false); setForm({ date: new Date().toISOString().slice(0, 10), type: 'FT', number: '', value: '' })
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Não foi possível adicionar o documento.') } finally { setSaving(false) }
+  // req 6: green highlight when the net invoiced equals Sell_Price.
+  const fullyInvoiced =
+    sellPrice != null && sellPrice > 0 && Math.abs(netInvoiced - sellPrice) <= 0.005
+
+  /** Net invoiced excluding one row (the row being edited). Used to enforce
+   *  req 5's "net faturado ≤ Sell Price" on the client. */
+  function netExcluding(excludeId: number | null): number {
+    return rows
+      .filter((d) => d.ID_Facturacao !== excludeId)
+      .reduce((sum, d) => sum + (d.Valor_Doc_FT ?? 0), 0)
   }
+
+  function validateDoc(value: number, otherNet: number): string | null {
+    if (!Number.isFinite(value)) return 'Valor inválido.'
+    if (sellPrice != null && otherNet + value > sellPrice + 0.005) {
+      return `O net faturado não pode ultrapassar o Sell Price (${formatPrice(sellPrice)}).`
+    }
+    return null
+  }
+
+  function startAdd() {
+    setForm((current) => ({
+      ...current,
+      type: current.type || defaultDocumentType,
+    }))
+    setError(null)
+    setAdding(true)
+  }
+
+  async function handleAdd() {
+    if (!form.type || !form.number || form.value === '') return
+    setError(null)
+    const value = Number(form.value)
+    const msg = validateDoc(value, netInvoiced)
+    if (msg) {
+      setError(msg)
+      return
+    }
+    setSaving(true)
+    try {
+      const created = await facturacao.add(
+        {
+          ID_Order: orderId,
+          DT_Doc_FT: new Date(form.date).toISOString(),
+          ID_Tp_Doc_FT: form.type,
+          N_Doc_FT: form.number,
+          Valor_Doc_FT: Number(form.value),
+          ID_User: String(user.ID_User),
+        },
+        role,
+      )
+      // Reflect the new document instantly; the order's `Facturado` flag is
+      // recomputed server-side, so refresh the detail/list in the background.
+      // The invoicing list is invalidated too so the server re-sorts it by
+      // `DT_Doc_FT` (the appended row may land out of order); the cached rows
+      // stay on screen during the refetch, so there is no flash.
+      queryClient.setQueryData<DocumentoFaturacao[]>(['orders', 'facturacao', orderId], (old) => [
+        ...(old ?? []),
+        created,
+      ])
+      queryClient.invalidateQueries({ queryKey: ['orders', 'facturacao', orderId] })
+      queryClient.invalidateQueries({ queryKey: ['orders', 'detail', orderId] })
+      queryClient.invalidateQueries({ queryKey: ['orders', 'list'] })
+      setAdding(false)
+      setForm({
+        date: new Date().toISOString().slice(0, 10),
+        type: defaultDocumentType,
+        number: '',
+        value: '',
+      })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Não foi possível adicionar o documento.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function startEditRow(d: DocumentoFaturacao) {
+    setEditingId(d.ID_Facturacao)
+    setEditForm({
+      date: d.DT_Doc_FT ? d.DT_Doc_FT.slice(0, 10) : '',
+      type: d.ID_Tp_Doc_FT ?? defaultDocumentType,
+      number: d.N_Doc_FT ?? '',
+      value: d.Valor_Doc_FT == null ? '' : String(d.Valor_Doc_FT),
+    })
+    setError(null)
+  }
+
+  function saveEditRow(d: DocumentoFaturacao) {
+    if (!editForm.number || editForm.value === '') return
+    const value = Number(editForm.value)
+    const msg = validateDoc(value, netExcluding(d.ID_Facturacao))
+    if (msg) {
+      setError(msg)
+      return
+    }
+    updateMutation.mutate(
+      {
+        id: d.ID_Facturacao,
+        patch: {
+          DT_Doc_FT: editForm.date ? new Date(editForm.date).toISOString() : null,
+          ID_Tp_Doc_FT: editForm.type || null,
+          N_Doc_FT: editForm.number,
+          Valor_Doc_FT: Number(editForm.value),
+        },
+      },
+      {
+        onSuccess: () => setEditingId(null),
+        onError: (e) =>
+          setError(e instanceof Error ? e.message : 'Não foi possível guardar o documento.'),
+      },
+    )
+  }
+
+  function handleDelete(d: DocumentoFaturacao) {
+    if (!window.confirm(`Apagar o documento ${displayText(d.N_Doc_FT)}?`)) return
+    deleteMutation.mutate(
+      { id: d.ID_Facturacao },
+      {
+        onError: (e) =>
+          setError(e instanceof Error ? e.message : 'Não foi possível apagar o documento.'),
+      },
+    )
+  }
+
   return (
-    <SectionCard title="DOCUMENTOS FATURADOS" action={canAdd && !adding ? <Button size="sm" variant="secondary" onClick={() => setAdding(true)}><Plus className="size-4" /> Adicionar documento</Button> : undefined}>
-      {adding && <div className="flex flex-wrap items-end gap-2 border-b border-border bg-surface-muted p-3">
-        <Input aria-label="Data do documento" type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
-        <Select aria-label="Tipo de documento" value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}><option value="FT">FT</option><option value="NC">NC</option><option value="ND">ND</option></Select>
-        <Input aria-label="Número do documento" placeholder="Nº documento" value={form.number} onChange={(e) => setForm((f) => ({ ...f, number: e.target.value }))} />
-        <Input aria-label="Valor do documento" type="number" step="0.01" value={form.value} onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))} />
-        <Button size="sm" onClick={handleAdd} disabled={saving}>Adicionar</Button>
-        <Button size="sm" variant="ghost" onClick={() => setAdding(false)} disabled={saving}>Cancelar</Button>
-      </div>}
-      {error && <p role="alert" className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
+    <SectionCard
+      title="DOCUMENTOS FATURADOS"
+      action={
+        canAdd && !adding && documentTypes.length > 0 ? (
+          <Button size="sm" variant="secondary" onClick={startAdd}>
+            <Plus className="size-4" aria-hidden /> Adicionar documento
+          </Button>
+        ) : undefined
+      }
+    >
+      {documentTypesPending && (
+        <p className="border-b border-border px-3 py-2 text-xs text-foreground/60">
+          A carregar tipos de documento…
+        </p>
+      )}
+      {queryError && (
+        <p
+          role="alert"
+          className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {queryError}
+        </p>
+      )}
+      {documentTypesError && (
+        <p
+          role="alert"
+          className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {documentTypesError}
+        </p>
+      )}
+      {adding && (
+        <div className="flex flex-wrap items-end gap-2 border-b border-border bg-surface-muted p-3">
+          <Input
+            aria-label="Data do documento"
+            type="date"
+            value={form.date}
+            onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+          />
+          <Select
+            aria-label="Tipo de documento"
+            value={form.type}
+            onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+          >
+            {documentTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.label}
+              </option>
+            ))}
+          </Select>
+          <Input
+            aria-label="Número do documento"
+            placeholder="Nº documento"
+            value={form.number}
+            onChange={(e) => setForm((f) => ({ ...f, number: e.target.value }))}
+          />
+          <Input
+            aria-label="Valor do documento"
+            type="number"
+            step="0.01"
+            value={form.value}
+            onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
+          />
+          <Button size="sm" onClick={handleAdd} disabled={saving}>
+            Adicionar
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setAdding(false)} disabled={saving}>
+            Cancelar
+          </Button>
+        </div>
+      )}
+      {error && (
+        <p
+          role="alert"
+          className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {error}
+        </p>
+      )}
       {rows.length === 0 ? (
         <p className="m-3 rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-foreground/50">
           Sem documentos.
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border bg-surface-muted text-left text-[10px] uppercase text-foreground-muted">
                 <th className="px-2.5 py-1.5 font-semibold">Data</th>
                 <th className="px-2.5 py-1.5 font-semibold">Documento</th>
                 <th className="px-2.5 py-1.5 font-semibold">Nº</th>
                 <th className="px-2.5 py-1.5 text-right font-semibold">Valor</th>
+                {canAdd && <th className="px-2.5 py-1.5 text-right font-semibold">Ações</th>}
               </tr>
             </thead>
             <tbody>
-              {rows.map((d) => (
-                <tr key={d.ID_Facturacao} className="border-b border-border/50">
-                  <td className="px-2.5 py-1.5 text-[11px]">{formatOrderDate(d.DT_Doc_FT)}</td>
-                  <td className="px-2.5 py-1.5 text-[11px]">
-                    {displayText(docFtLabel(d.ID_Tp_Doc_FT))}
-                  </td>
-                  <td className="px-2.5 py-1.5 text-[11px]">{displayText(d.N_Doc_FT)}</td>
-                  <td className="px-2.5 py-1.5 text-right text-[11px]">
-                    {formatPrice(d.Valor_Doc_FT)}
-                  </td>
-                </tr>
-              ))}
+              {rows.map((d) => {
+                if (editingId === d.ID_Facturacao) {
+                  return (
+                    <tr
+                      key={d.ID_Facturacao}
+                      className="border-b border-border/50 bg-surface-muted"
+                    >
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="date"
+                          aria-label="Data do documento"
+                          value={editForm.date}
+                          onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Select
+                          aria-label="Tipo de documento"
+                          value={editForm.type}
+                          onChange={(e) => setEditForm((f) => ({ ...f, type: e.target.value }))}
+                        >
+                          {editForm.type && !documentTypeLabels.has(editForm.type) && (
+                            <option value={editForm.type}>{editForm.type}</option>
+                          )}
+                          {documentTypes.map((type) => (
+                            <option key={type.id} value={type.id}>
+                              {type.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          aria-label="Número do documento"
+                          value={editForm.number}
+                          onChange={(e) => setEditForm((f) => ({ ...f, number: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          aria-label="Valor do documento"
+                          value={editForm.value}
+                          onChange={(e) => setEditForm((f) => ({ ...f, value: e.target.value }))}
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right">
+                        <Button
+                          size="sm"
+                          onClick={() => saveEditRow(d)}
+                          disabled={updateMutation.isPending}
+                        >
+                          Guardar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEditingId(null)}
+                          disabled={updateMutation.isPending}
+                        >
+                          Cancelar
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                }
+                return (
+                  <tr key={d.ID_Facturacao} className="border-b border-border/50">
+                    <td className="px-2.5 py-1.5 text-[11px]">{formatOrderDate(d.DT_Doc_FT)}</td>
+                    <td className="px-2.5 py-1.5 text-[11px]">
+                      {displayText(
+                        d.ID_Tp_Doc_FT
+                          ? (documentTypeLabels.get(d.ID_Tp_Doc_FT) ?? d.ID_Tp_Doc_FT)
+                          : null,
+                      )}
+                    </td>
+                    <td className="px-2.5 py-1.5 text-[11px]">{displayText(d.N_Doc_FT)}</td>
+                    <td className="px-2.5 py-1.5 text-right text-[11px]">
+                      {formatPrice(d.Valor_Doc_FT)}
+                    </td>
+                    {canAdd && (
+                      <td className="px-2.5 py-1.5 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Editar linha de documento ${d.ID_Facturacao}`}
+                            onClick={() => startEditRow(d)}
+                            disabled={updateMutation.isPending || deleteMutation.isPending}
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Apagar linha de documento ${d.ID_Facturacao}`}
+                            onClick={() => handleDelete(d)}
+                            disabled={updateMutation.isPending || deleteMutation.isPending}
+                          >
+                            <Trash2 className="size-3.5" aria-hidden />
+                          </Button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
             </tbody>
             <tfoot>
-              <tr className="text-foreground/60">
+              <tr
+                data-highlight={fullyInvoiced ? 'true' : undefined}
+                className={fullyInvoiced ? 'bg-success/15 text-success' : 'text-foreground/60'}
+              >
                 <td className="px-2.5 py-1.5 text-[11px] font-semibold" colSpan={3}>
                   Net faturado
                 </td>
                 <td className="px-2.5 py-1.5 text-right text-[11px] font-semibold">
                   {formatPrice(netInvoiced)}
                 </td>
+                {canAdd && <td className="px-2.5 py-1.5" />}
               </tr>
             </tfoot>
           </table>
@@ -714,17 +1412,36 @@ function DocumentosTable({ rows, orderId, role }: { rows: DocumentoFaturacao[]; 
 function ObservacoesEditor({ order, role }: { order: Order; role: RoleLike }) {
   const mutation = useUpdateOrder()
   const [value, setValue] = useState(order.Obs ?? '')
-  useEffect(() => setValue(order.Obs ?? ''), [order.Obs])
   const canSave = role !== 'viewer'
   function save() {
     if (!canSave || value === (order.Obs ?? '')) return
     mutation.mutate({ id: order.ID_Order, patch: { Obs: value || null } })
   }
-  return <div className="p-3">
-    <textarea aria-label="Observações" disabled={!canSave || mutation.isPending} value={value} onChange={(event) => setValue(event.target.value)} className="min-h-48 w-full resize-y rounded-md border border-border bg-surface p-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40" />
-    {mutation.isError && <p role="alert" className="mt-2 text-xs text-danger">{mutation.error.message}</p>}
-    <div className="mt-2 flex justify-end"><Button size="sm" onClick={save} disabled={!canSave || mutation.isPending || value === (order.Obs ?? '')}>Guardar observações</Button></div>
-  </div>
+  return (
+    <div className="p-3">
+      <textarea
+        aria-label="Observações"
+        disabled={!canSave || mutation.isPending}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        className="min-h-48 w-full resize-y rounded-md border border-border bg-surface p-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      />
+      {mutation.isError && (
+        <p role="alert" className="mt-2 text-xs text-danger">
+          {mutation.error.message}
+        </p>
+      )}
+      <div className="mt-2 flex justify-end">
+        <Button
+          size="sm"
+          onClick={save}
+          disabled={!canSave || mutation.isPending || value === (order.Obs ?? '')}
+        >
+          Guardar observações
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -756,9 +1473,12 @@ export function OrderDetailPage() {
   const params = useParams<{ id: string }>()
   const idParam = params.id
   const orderId = idParam ? Number(idParam) : NaN
-  const { data: order, isPending, isError, error } = useOrder(
-    Number.isNaN(orderId) ? null : orderId,
-  )
+  const {
+    data: order,
+    isPending,
+    isError,
+    error,
+  } = useOrder(Number.isNaN(orderId) ? null : orderId)
 
   if (Number.isNaN(orderId)) return notFoundState('The order identifier is invalid.')
 
@@ -789,6 +1509,7 @@ function OrderDetail({ order }: { order: Order }) {
 
   const recoQuery = useReconhecimentos(order.ID_Order)
   const docsQuery = useDocumentoFaturacao(order.ID_Order)
+  const documentTypesQuery = useDocumentoFaturacaoTypes()
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Draft>({})
@@ -827,21 +1548,42 @@ function OrderDetail({ order }: { order: Order }) {
     setDraft((d) => ({ ...d, [key]: value }))
   }
 
-  // Recognition split: warranty codes (W/WP) feed the Warranty bucket, everything
-  // else (CM/P/T) feeds the Instrument bucket.
+  // Recognition split (req 9): the warranty vs instrument bucket math lives in the
+  // pure `recognitionTotals` helper so it stays identical in mock and HTTP repos and
+  // is unit-tested. "Instrumento por Reconhecer" = (Sell_Price − Warranty_Reserve) −
+  // instrument reconhecido (the fix for the old formula that dropped the reserve).
   const recos = recoQuery.data ?? []
-  const warrantyCodes = new Set<string>(['W', 'WP'])
-  const instrumentReconhecido = recos
-    .filter((r) => !warrantyCodes.has(r.ID_Tp_Reconhecimento ?? ''))
-    .reduce((s, r) => s + (r.Valor_Reconhecimento ?? 0), 0)
-  const warrantyReconhecido = recos
-    .filter((r) => warrantyCodes.has(r.ID_Tp_Reconhecimento ?? ''))
-    .reduce((s, r) => s + (r.Valor_Reconhecimento ?? 0), 0)
-  const instrumentPorReconhecer = (order.Sell_Price ?? 0) - instrumentReconhecido
-  const warrantyPorReconhecer = (order.Warranty_Reserve ?? 0) - warrantyReconhecido
-  const totalReconhecido = instrumentReconhecido + warrantyReconhecido
+  const totals = recognitionTotals(order, recos)
+  const {
+    instrumentReconhecido,
+    instrumentPorReconhecer,
+    warrantyReconhecido,
+    warrantyPorReconhecer,
+    totalReconhecido,
+  } = totals
+  // req 6: green highlight on "Total Reconhecido" when it reaches Sell_Price.
+  const fullyRecognized =
+    order.Sell_Price != null &&
+    order.Sell_Price > 0 &&
+    Math.abs(totalReconhecido - order.Sell_Price) <= 0.005
 
   const docs = docsQuery.data ?? []
+  const documentTypes = documentTypesQuery.data ?? []
+  const documentTypesError = documentTypesQuery.isError
+    ? documentTypesQuery.error instanceof Error
+      ? documentTypesQuery.error.message
+      : 'Não foi possível carregar os tipos de documento.'
+    : null
+  const recoError = recoQuery.isError
+    ? recoQuery.error instanceof Error
+      ? recoQuery.error.message
+      : 'Não foi possível carregar os reconhecimentos.'
+    : null
+  const docsError = docsQuery.isError
+    ? docsQuery.error instanceof Error
+      ? docsQuery.error.message
+      : 'Não foi possível carregar os documentos faturados.'
+    : null
   const netInvoiced = docs.reduce((sum, d) => sum + (d.Valor_Doc_FT ?? 0), 0)
   const porFaturar = (order.Sell_Price ?? 0) - netInvoiced
 
@@ -849,7 +1591,7 @@ function OrderDetail({ order }: { order: Order }) {
   const canCreate = role !== 'viewer'
 
   const revenueMetrics = (
-    <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2 2xl:grid-cols-4">
       <EditableMetric
         def={REVENUE_FIELDS[0]}
         order={order}
@@ -861,16 +1603,19 @@ function OrderDetail({ order }: { order: Order }) {
         icon={ShoppingCart}
         tag="Total"
       />
-      <EditableMetric
-        def={REVENUE_FIELDS[1]}
-        order={order}
-        editing={editing}
-        role={role}
-        value={draft[REVENUE_FIELDS[1].key] ?? ''}
-        onChange={(v) => setField(REVENUE_FIELDS[1].key, v)}
-        tone="green"
-        icon={ShieldCheck}
-      />
+      {/* Warranty Reserve only applies to warranty order kinds (req 11). */}
+      {order.Tipo_Warranty === true && (
+        <EditableMetric
+          def={REVENUE_FIELDS[1]}
+          order={order}
+          editing={editing}
+          role={role}
+          value={draft[REVENUE_FIELDS[1].key] ?? ''}
+          onChange={(v) => setField(REVENUE_FIELDS[1].key, v)}
+          tone="green"
+          icon={ShieldCheck}
+        />
+      )}
       <MetricCard
         tone="purple"
         icon={BadgeCheck}
@@ -883,23 +1628,29 @@ function OrderDetail({ order }: { order: Order }) {
         label="Instrumento por Reconhecer"
         value={formatPrice(instrumentPorReconhecer)}
       />
-      <MetricCard
-        tone="green"
-        icon={ShieldCheck}
-        label="Garantia Reconhecida"
-        value={formatPrice(warrantyReconhecido)}
-      />
-      <MetricCard
-        tone="orange"
-        icon={ShieldAlert}
-        label="Garantia por Reconhecer"
-        value={formatPrice(warrantyPorReconhecer)}
-      />
+      {/* Warranty KPIs only apply to warranty order kinds (req 11). */}
+      {order.Tipo_Warranty === true && (
+        <>
+          <MetricCard
+            tone="green"
+            icon={ShieldCheck}
+            label="Garantia Reconhecida"
+            value={formatPrice(warrantyReconhecido)}
+          />
+          <MetricCard
+            tone="orange"
+            icon={ShieldAlert}
+            label="Garantia por Reconhecer"
+            value={formatPrice(warrantyPorReconhecer)}
+          />
+        </>
+      )}
       <MetricCard
         tone="blue"
         icon={TrendingUp}
         label="Total Reconhecido"
         value={formatPrice(totalReconhecido)}
+        highlight={fullyRecognized}
       />
     </div>
   )
@@ -911,8 +1662,16 @@ function OrderDetail({ order }: { order: Order }) {
       content: (
         <div className="space-y-3 pt-3.5">
           {revenueMetrics}
-           <ReconhecimentosSection orderId={order.ID_Order} rows={recos} role={role} sellPrice={order.Sell_Price} warrantyReserve={order.Warranty_Reserve} />
-           <DocumentosTable orderId={order.ID_Order} role={role} rows={docs} />
+          <ReconhecimentosSection order={order} rows={recos} role={role} queryError={recoError} />
+          <DocumentosTable
+            order={order}
+            rows={docs}
+            role={role}
+            documentTypes={documentTypes}
+            documentTypesPending={documentTypesQuery.isPending}
+            documentTypesError={documentTypesError}
+            queryError={docsError}
+          />
         </div>
       ),
     },
@@ -922,8 +1681,18 @@ function OrderDetail({ order }: { order: Order }) {
       content: (
         <div className="space-y-3 pt-3.5">
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-            <MetricCard tone="orange" icon={Receipt} label="Por Faturar" value={formatPrice(porFaturar)} />
-            <MetricCard tone="green" icon={FileText} label="Documentos Emitidos" value={String(docs.length)} />
+            <MetricCard
+              tone="orange"
+              icon={Receipt}
+              label="Por Faturar"
+              value={formatPrice(porFaturar)}
+            />
+            <MetricCard
+              tone="green"
+              icon={FileText}
+              label="Documentos Emitidos"
+              value={String(docs.length)}
+            />
             <MetricCard tone="purple" icon={Mail} label="Estado E-Mail" value="Não enviado" />
           </div>
 
@@ -955,12 +1724,22 @@ function OrderDetail({ order }: { order: Order }) {
             </div>
           </SectionCard>
 
-           <DocumentosTable orderId={order.ID_Order} role={role} rows={docs} />
+          <DocumentosTable
+            order={order}
+            rows={docs}
+            role={role}
+            documentTypes={documentTypes}
+            documentTypesPending={documentTypesQuery.isPending}
+            documentTypesError={documentTypesError}
+            queryError={docsError}
+          />
 
           <SectionCard title="ENVIO POR E-MAIL">
             <div className="grid grid-cols-1 items-center gap-3 p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto]">
               <div className="min-w-0">
-                <span className="block text-[9px] uppercase text-foreground-muted">Destinatário</span>
+                <span className="block text-[9px] uppercase text-foreground-muted">
+                  Destinatário
+                </span>
                 <strong className="mt-1 block text-[11px] font-medium text-foreground">
                   {order.Email ? displayText(order.Email) : 'Sem email definido'}
                 </strong>
@@ -997,7 +1776,11 @@ function OrderDetail({ order }: { order: Order }) {
         <div className="space-y-3 pt-3.5">
           <SectionCard title="OBSERVAÇÕES DO PEDIDO">
             <div className="grid grid-cols-1 gap-3.5 p-3 lg:grid-cols-[1fr_280px]">
-              <ObservacoesEditor order={order} role={role} />
+              <ObservacoesEditor
+                key={`${order.ID_Order}:${order.Obs ?? ''}`}
+                order={order}
+                role={role}
+              />
 
               <aside className="flex flex-col gap-2.5">
                 <div className="rounded-md border border-border bg-surface-muted p-2.5">
@@ -1012,7 +1795,9 @@ function OrderDetail({ order }: { order: Order }) {
                   </div>
                   <div className="flex min-h-[30px] items-center justify-between gap-2 border-t border-border/60 py-1.5 text-[10px]">
                     <span className="text-foreground-muted">Mês fechado</span>
-                    <Badge tone={historico ? 'neutral' : 'success'}>{historico ? 'Sim' : 'Não'}</Badge>
+                    <Badge tone={historico ? 'neutral' : 'success'}>
+                      {historico ? 'Sim' : 'Não'}
+                    </Badge>
                   </div>
                   <div className="flex min-h-[30px] items-center justify-between gap-2 border-t border-border/60 py-1.5 text-[10px]">
                     <span className="text-foreground-muted">Negócio fechado</span>
@@ -1062,7 +1847,8 @@ function OrderDetail({ order }: { order: Order }) {
                 Sem histórico de observações
               </strong>
               <span className="max-w-[420px] text-[10px]">
-                Alterações futuras podem ser apresentadas aqui quando existir audit trail no backend.
+                Alterações futuras podem ser apresentadas aqui quando existir audit trail no
+                backend.
               </span>
             </div>
           </SectionCard>
@@ -1110,7 +1896,11 @@ function OrderDetail({ order }: { order: Order }) {
           </label>
           <BackButton />
           {canCreate && (
-            <Button size="sm" variant="secondary" onClick={() => navigate(`/orders/new?clientId=${order.ID_Client ?? ''}`)}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => navigate(`/orders/new?clientId=${order.ID_Client ?? ''}`)}
+            >
               Novo deste cliente
             </Button>
           )}
@@ -1124,7 +1914,12 @@ function OrderDetail({ order }: { order: Order }) {
               <Button size="sm" onClick={save} disabled={mutation.isPending}>
                 Guardar
               </Button>
-              <Button size="sm" variant="secondary" onClick={cancelEdit} disabled={mutation.isPending}>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={cancelEdit}
+                disabled={mutation.isPending}
+              >
                 Cancelar
               </Button>
             </>
@@ -1148,17 +1943,24 @@ function OrderDetail({ order }: { order: Order }) {
         <div className="flex flex-col gap-3">
           <SectionCard title="CARACTERIZAÇÃO DO PEDIDO" bodyClassName="pb-2.5">
             <ReadOnlyRow label="ID Order">{order.ID_Order}</ReadOnlyRow>
-            {CARACTERIZACAO_FIELDS.map((def) => (
-              <CaracterizacaoRow
-                key={def.key}
-                def={def}
-                order={order}
-                editing={editing}
-                role={role}
-                value={draft[def.key] ?? ''}
-                onChange={(v) => setField(def.key, v)}
-              />
-            ))}
+            {CARACTERIZACAO_FIELDS.map((def) => {
+              // req 4/11: warranty classification fields only apply to warranty
+              // order kinds (Tipo.Warranty = true); omit them entirely otherwise.
+              const isWarrantyField =
+                def.key === 'ID_Tp_Warranty' || def.key === 'Warranty_DT_Inicio'
+              if (isWarrantyField && order.Tipo_Warranty !== true) return null
+              return (
+                <CaracterizacaoRow
+                  key={def.key}
+                  def={def}
+                  order={order}
+                  editing={editing}
+                  role={role}
+                  value={draft[def.key] ?? ''}
+                  onChange={(v) => setField(def.key, v)}
+                />
+              )
+            })}
             <ReadOnlyRow label="Negócio Fechado">
               <Badge tone={order.Negocio_Fechado ? 'success' : 'neutral'}>
                 {order.Negocio_Fechado ? 'Sim' : 'Não'}

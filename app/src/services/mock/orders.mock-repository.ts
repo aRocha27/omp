@@ -9,7 +9,14 @@ import type { Order, OrderSearchFilters, OrderSummary } from '@/domain/models/or
 import { normaliseOrderFilters } from '@/domain/models/order'
 import type { Role } from '@/domain/models/user'
 import { RepositoryError, type OrderCreateInput, type OrderUpdatePatch, type OrdersRepository } from '@/services/contracts/orders.repository'
-import { orders, resolveClientName, toOrderSummary } from '@/fixtures/orders'
+import { resolveClientName, toOrderSummary } from '@/fixtures/orders'
+import { resolveTipoWarranty } from '@/fixtures/reference-data'
+import { MockDataStore } from '@/services/mock/mock-data-store'
+import { assertMockMutationRole } from '@/services/mock/mock-authorization'
+import {
+  assertExistingInvoicingCapacity,
+  assertExistingRecognitionCapacity,
+} from '@/services/mock/mock-capacity'
 
 /** Simulated network latency for realistic loading-state behaviour (ms). */
 const MOCK_LATENCY_MS = 120
@@ -74,11 +81,11 @@ function matches(row: Order, filters: OrderSearchFilters): boolean {
 }
 
 export class MockOrdersRepository implements OrdersRepository {
-  // Per-instance shallow copy of the fixture. `update` mutates this copy, not
-  // the shared module-level array, so edits in one test render never leak into
-  // another (each render gets a fresh repository instance with fresh data) —
-  // while a subsequent `getById` on the SAME instance still sees the change.
-  private readonly rows: Order[] = orders.map((row) => ({ ...row }))
+  private readonly rows: Order[]
+
+  constructor(private readonly store: MockDataStore = new MockDataStore()) {
+    this.rows = store.orders
+  }
 
   async search(filters: OrderSearchFilters): Promise<OrderSummary[]> {
     const active = normaliseOrderFilters(filters)
@@ -98,8 +105,9 @@ export class MockOrdersRepository implements OrdersRepository {
     return this.rows.find((row) => row.ID_Order === id) ?? null
   }
 
-  async update(id: number, patch: OrderUpdatePatch, _role: Role): Promise<Order> {
+  async update(id: number, patch: OrderUpdatePatch, role: Role): Promise<Order> {
     await delay(MOCK_LATENCY_MS)
+    assertMockMutationRole(role, 'Sem permissão para alterar pedidos.')
     // Mutate the per-instance copy so the next `getById` is consistent with the
     // edit, mirroring how the live DB persists the change — without touching the
     // shared fixture (which would pollute other test renders).
@@ -107,12 +115,33 @@ export class MockOrdersRepository implements OrdersRepository {
     if (!current) {
       throw new RepositoryError('not-found', 'Order not found.')
     }
-    Object.assign(current, patch)
+    const candidate: Order = { ...current, ...patch }
+    if ('ID_Tipo' in patch) {
+      candidate.Tipo_Warranty = resolveTipoWarranty(candidate.ID_Tipo)
+    }
+
+    if (
+      'Sell_Price' in patch ||
+      'Warranty_Reserve' in patch ||
+      'ID_Tipo' in patch
+    ) {
+      assertExistingRecognitionCapacity(
+        candidate,
+        this.store.reconhecimentos.filter((row) => row.ID_Order === id),
+      )
+      assertExistingInvoicingCapacity(
+        candidate,
+        this.store.facturacao.filter((row) => row.ID_Order === id),
+      )
+    }
+
+    Object.assign(current, candidate)
     return { ...current }
   }
 
-  async create(input: OrderCreateInput, _role: Role): Promise<Order> {
+  async create(input: OrderCreateInput, role: Role): Promise<Order> {
     await delay(MOCK_LATENCY_MS)
+    assertMockMutationRole(role, 'Sem permissão para criar pedidos.')
     const order: Order = {
       ID_Order: Math.max(...this.rows.map((row) => row.ID_Order), 0) + 1,
       DT_Order: input.DT_Order ?? new Date().toISOString(),
@@ -123,6 +152,7 @@ export class MockOrdersRepository implements OrdersRepository {
       ID_Client: input.ID_Client ?? null,
       ID_Area: input.ID_Area ?? null,
       ID_Tipo: input.ID_Tipo ?? null,
+      Tipo_Warranty: resolveTipoWarranty(input.ID_Tipo ?? null),
       ID_Produto: input.ID_Produto ?? null,
       ID_Instrumento: input.ID_Instrumento ?? null,
       Orc_Proposta: input.Orc_Proposta ?? null,

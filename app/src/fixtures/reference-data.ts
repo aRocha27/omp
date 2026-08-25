@@ -15,6 +15,18 @@ export interface ReferenceOption {
   label: string
 }
 
+/**
+ * Order kind option, extended with the `dbo.Tipo.Warranty` bit (harvested from
+ * BRKR_ERP). `warranty=true` kinds (INSTR/ACESS/WARR) carry a warranty reserve
+ * and expose the warranty caracterização fields + the propagate-garantia button;
+ * the rest (CM/CONS/SERVI/SPARE/TR) do not. The live detail endpoint resolves
+ * this same bit server-side into `Order.Tipo_Warranty`; the mock derives it here
+ * from `ID_Tipo` (see `resolveTipoWarranty`).
+ */
+export interface TipoOption extends ReferenceOption {
+  warranty: boolean
+}
+
 /** Order type code (`Order.ID_Tp_Order`, string). Harvested from dbo.Tp_Order. */
 export const orderTypes: readonly ReferenceOption[] = [
   { id: 'C', label: 'Client' },
@@ -34,17 +46,28 @@ export const areas: readonly ReferenceOption[] = [
   { id: 'BOPT', label: 'BOPT' },
 ]
 
-/** Order kind (`Order.ID_Tipo`, string code). */
-export const tipos: readonly ReferenceOption[] = [
-  { id: 'INSTR', label: 'INSTRUMENT' },
-  { id: 'ACESS', label: 'ACESSORIES' },
-  { id: 'CM', label: 'MAINTENANCE CONTRACT' },
-  { id: 'CONS', label: 'CONSUMABLES' },
-  { id: 'SERVI', label: 'SERVICE' },
-  { id: 'SPARE', label: 'SPARE-PARTS' },
-  { id: 'TR', label: 'TRAINING' },
-  { id: 'WARR', label: 'WARRANTY RESERVE' },
+/** Order kind (`Order.ID_Tipo`, string code). `warranty` mirrors `dbo.Tipo.Warranty`. */
+export const tipos: readonly TipoOption[] = [
+  { id: 'INSTR', label: 'INSTRUMENT', warranty: true },
+  { id: 'ACESS', label: 'ACESSORIES', warranty: true },
+  { id: 'CM', label: 'MAINTENANCE CONTRACT', warranty: false },
+  { id: 'CONS', label: 'CONSUMABLES', warranty: false },
+  { id: 'SERVI', label: 'SERVICE', warranty: false },
+  { id: 'SPARE', label: 'SPARE-PARTS', warranty: false },
+  { id: 'TR', label: 'TRAINING', warranty: false },
+  { id: 'WARR', label: 'WARRANTY RESERVE', warranty: true },
 ]
+
+/**
+ * Resolve the `Tipo.Warranty` bit for an order kind code, mirroring the live
+ * `dbo.Tipo` join. Returns `null` for an unknown/null code so the UI treats an
+ * unresolved kind as "no warranty" rather than asserting a default.
+ */
+export function resolveTipoWarranty(idTipo: string | null | undefined): boolean | null {
+  if (idTipo === null || idTipo === undefined) return null
+  const match = tipos.find((o) => String(o.id) === String(idTipo))
+  return match ? match.warranty : null
+}
 
 /** Product (`Order.ID_Produto`, number). */
 export const produtos: readonly ReferenceOption[] = [

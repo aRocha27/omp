@@ -81,6 +81,7 @@ export type ApiErrorCode =
   | 'forbidden'
   | 'field-locked'
   | 'not-found'
+  | 'capacity-exceeded'
 
 // Orders read path. `OrderSummaryRow` mirrors the reconciled frontend `OrderSummary`
 // (Client_Name is aliased from the V_Order_List `nome` column; ID_Area/ID_Tipo are string
@@ -112,6 +113,8 @@ export type OrderSummaryRow = {
 // is nvarchar in the DB (a budget/proposal reference, not money), so it is exposed as a
 // string. Provisoria is inherited from OrderSummaryRow (resolved via V_Order_List).
 export type OrderDetailRow = OrderSummaryRow & {
+  /** dbo.Tipo.Warranty, resolved by joining Order.ID_Tipo to Tipo.ID_Tipo. */
+  Tipo_Warranty: boolean | null
   Orc_Proposta: string | null
   PO_Cliente: string | null
   ID_Tp_Warranty: number | null
@@ -185,7 +188,10 @@ export type OrderUpdateChanges = OrderUpdatePatch & {
   user: string
 }
 
-export type OrderCreateInput = Omit<OrderUpdatePatch, 'Facturado' | 'Reconhecido' | 'Negocio_Fechado'> & {
+export type OrderCreateInput = Omit<
+  OrderUpdatePatch,
+  'Facturado' | 'Reconhecido' | 'Negocio_Fechado'
+> & {
   DT_Order: string
   ID_Tp_Order: string
   ID_Client: number
@@ -254,6 +260,11 @@ export type ReconhecimentoRow = {
   DT_User: string | null
 }
 
+export type DocumentoFaturacaoTypeRow = {
+  id: string
+  label: string
+}
+
 export type DocumentoFaturacaoRow = {
   ID_Facturacao: number
   ID_Order: number
@@ -289,6 +300,26 @@ export type NewFacturacaoInput = {
   N_Doc_FT: string
   Valor_Doc_FT: number
 }
+
+export type ReconhecimentoPatch = Partial<
+  Pick<ReconhecimentoRow, 'ID_Tp_Reconhecimento' | 'DT_Reconhecimento' | 'Valor_Reconhecimento'>
+>
+
+export type FacturacaoPatch = Partial<
+  Pick<DocumentoFaturacaoRow, 'DT_Doc_FT' | 'ID_Tp_Doc_FT' | 'N_Doc_FT' | 'Valor_Doc_FT'>
+>
+
+export type PropagateReconhecimentoInput =
+  | {
+      orderId: number
+      kind: 'warranty'
+    }
+  | {
+      orderId: number
+      kind: 'maintenance'
+      startDate: string
+      years: number
+    }
 
 export type UtilizadorRow = {
   ID_User: string

@@ -46,6 +46,7 @@ const detailRow: Order = {
   Client_Name: 'Client Alpha',
   ID_Area: 'BDAL',
   ID_Tipo: 'INSTR',
+  Tipo_Warranty: true,
   ID_Produto: 1,
   ID_Instrumento: 8,
   Orc_Proposta: 'ORC-1001',

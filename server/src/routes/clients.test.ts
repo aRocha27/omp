@@ -60,8 +60,14 @@ function clientsDependencies(overrides: Partial<AppDependencies> = {}) {
     createOrder: vi.fn(async () => null as never),
     fetchReconhecimentos: vi.fn(async () => []),
     fetchFacturacao: vi.fn(async () => []),
+    fetchFacturacaoTypes: vi.fn(async () => []),
     addReconhecimento: vi.fn(async () => null as never),
+    updateReconhecimento: vi.fn(async () => null),
+    deleteReconhecimento: vi.fn(async () => false),
+    propagateReconhecimento: vi.fn(async () => []),
     addFacturacao: vi.fn(async () => null as never),
+    updateFacturacao: vi.fn(async () => null),
+    deleteFacturacao: vi.fn(async () => false),
     fetchClientSummaries: vi.fn(async () => [summaryRow]),
     fetchClientById: vi.fn(async () => detailRow),
     close,
@@ -100,9 +106,7 @@ describe('Clients API', () => {
   it('forwards filters and a custom limit to the repository', async () => {
     const deps = clientsDependencies()
     const filters = { search: 'ITQB', idTpCliente: [1, 2] }
-    const response = await clientsApi(deps)
-      .post('/api/clients/list')
-      .send({ filters, limit: 50 })
+    const response = await clientsApi(deps).post('/api/clients/list').send({ filters, limit: 50 })
 
     expect(response.status).toBe(200)
     expect(deps.fetchClientSummaries).toHaveBeenCalledWith(expect.anything(), filters, 50)

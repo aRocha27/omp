@@ -12,6 +12,8 @@
  * - 1004: order without factory data
  * - 1005: high-value order
  * - 1006: order with all optional fields null
+ * - 1007: Maintenance Contract (ID_Tipo 'CM', Tipo.Warranty false) — covers the
+ *   non-warranty case (warranty fields omitted) and the contract-propagation path.
  */
 import type { Order, OrderSummary } from '@/domain/models/order'
 
@@ -28,6 +30,7 @@ export const clientNameById: Readonly<Record<number, string>> = {
   502: 'Client Beta',
   503: 'Test Dealer',
   504: 'Demo Hospital',
+  505: 'Maintenance Co',
 }
 
 /** Resolve a client display name from an `ID_Client`, mirroring V_Order_List. */
@@ -76,6 +79,7 @@ export const orders: readonly Order[] = [
     ID_Client: 501,
     ID_Area: 'BDAL',
     ID_Tipo: 'INSTR',
+    Tipo_Warranty: true,
     ID_Produto: 10,
     ID_Instrumento: 1,
     Orc_Proposta: 'ORC-1001',
@@ -108,6 +112,7 @@ export const orders: readonly Order[] = [
     ID_Client: 502,
     ID_Area: 'BDAL',
     ID_Tipo: 'INSTR',
+    Tipo_Warranty: true,
     ID_Produto: 11,
     ID_Instrumento: 2,
     Orc_Proposta: 'ORC-1002',
@@ -140,6 +145,7 @@ export const orders: readonly Order[] = [
     ID_Client: 503,
     ID_Area: 'BOPT',
     ID_Tipo: 'ACESS',
+    Tipo_Warranty: true,
     ID_Produto: 12,
     ID_Instrumento: 5,
     Orc_Proposta: 'ORC-1003',
@@ -172,6 +178,7 @@ export const orders: readonly Order[] = [
     ID_Client: 504,
     ID_Area: 'BOPT',
     ID_Tipo: 'ACESS',
+    Tipo_Warranty: true,
     ID_Produto: 13,
     ID_Instrumento: null,
     Orc_Proposta: 'ORC-1004',
@@ -204,6 +211,7 @@ export const orders: readonly Order[] = [
     ID_Client: 501,
     ID_Area: 'BDAL',
     ID_Tipo: 'INSTR',
+    Tipo_Warranty: true,
     ID_Produto: 10,
     ID_Instrumento: 8,
     Orc_Proposta: 'ORC-1005',
@@ -236,6 +244,7 @@ export const orders: readonly Order[] = [
     ID_Client: null,
     ID_Area: null,
     ID_Tipo: null,
+    Tipo_Warranty: null,
     ID_Produto: null,
     ID_Instrumento: null,
     Orc_Proposta: null,
@@ -257,6 +266,39 @@ export const orders: readonly Order[] = [
     Kit_Amount: null,
     Contacto: null,
     Email: null,
+  },
+  {
+    ID_Order: 1007,
+    DT_Order: '2025-10-10',
+    Order_Factory: false,
+    ID_Tp_Order: 'C',
+    Provisoria: false,
+    Encomenda_Cli_PHC: 'PHC-1007',
+    ID_Client: 505,
+    ID_Area: 'BOPT',
+    ID_Tipo: 'CM',
+    Tipo_Warranty: false,
+    ID_Produto: 5,
+    ID_Instrumento: null,
+    Orc_Proposta: 'ORC-1007',
+    PO_Cliente: 'PO-MAINT-007',
+    Sell_Price: 12000,
+    ID_Tp_Warranty: null,
+    Warranty_Reserve: null,
+    Warranty_DT_Inicio: null,
+    ID_Tp_Revenue: 3,
+    Facturado: false,
+    Reconhecido: false,
+    Cod_Enc_Fornecedor: 'SUP-1007',
+    Obs: 'Synthetic maintenance contract for Maintenance Co.',
+    Negocio_Fechado: false,
+    ID_User: 'u_demo_c',
+    DT_User: '2025-10-10T09:00:00Z',
+    upsize_ts: null,
+    Kit: false,
+    Kit_Amount: null,
+    Contacto: 'Carol Demo',
+    Email: 'carol@demo-maint.example',
   },
 ]
 

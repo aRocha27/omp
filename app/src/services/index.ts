@@ -15,6 +15,7 @@ import { HttpOrdersRepository } from './http/orders.http-repository'
 import { HttpClientsRepository } from './http/clients.http-repository'
 import { MockReconhecimentoRepository } from './mock/reconhecimento.mock-repository'
 import { MockDocumentoFaturacaoRepository } from './mock/documento-faturacao.mock-repository'
+import { MockDataStore } from './mock/mock-data-store'
 import { HttpReconhecimentoRepository } from './http/reconhecimento.http-repository'
 import { HttpDocumentoFaturacaoRepository } from './http/documento-faturacao.http-repository'
 
@@ -38,18 +39,16 @@ export function createRepositories(): Repositories {
     return {
       orders: new HttpOrdersRepository(),
       clients,
-      // Live sub-table reads (dbo.Reconhecimento / dbo.Facturacao) — no fictitious
-      // data on the Revenue/Invoicing tabs. `add` throws (live write is a flagged
-      // follow-up); the order-detail page hides the add actions in api mode.
       reconhecimentos: new HttpReconhecimentoRepository(),
       facturacao: new HttpDocumentoFaturacaoRepository(),
     }
   }
+  const mockStore = new MockDataStore()
   return {
-    orders: new MockOrdersRepository(),
+    orders: new MockOrdersRepository(mockStore),
     clients,
-    reconhecimentos: new MockReconhecimentoRepository(),
-    facturacao: new MockDocumentoFaturacaoRepository(),
+    reconhecimentos: new MockReconhecimentoRepository(mockStore),
+    facturacao: new MockDocumentoFaturacaoRepository(mockStore),
   }
 }
 

@@ -7,11 +7,16 @@ import { useRepositories } from '@/app/providers/repository-provider'
  *
  * The query is disabled when `orderId` is null/undefined so a missing id does
  * not fire the fetch — callers render the empty state without a round-trip.
- *
- * TODO: add a `useAddDocumentoFaturacao` mutation hook when the
- * `[+ Documento]` button lands; for now the detail page calls `facturacao.add`
- * directly.
  */
+export function useDocumentoFaturacaoTypes() {
+  const { facturacao } = useRepositories()
+  return useQuery({
+    queryKey: ['orders', 'facturacao', 'types'],
+    queryFn: () => facturacao.listTypes(),
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
 export function useDocumentoFaturacao(orderId: number | null | undefined) {
   const { facturacao } = useRepositories()
   return useQuery({

@@ -7,11 +7,11 @@ describe('OrdersPage', () => {
   it('renders fixture rows ordered newest-first', async () => {
     renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
 
-    // The mock repository returns 6 deterministic summaries.
+    // The mock repository returns 7 deterministic summaries.
     expect(await screen.findByRole('table')).toBeInTheDocument()
     const rows = within(screen.getByRole('table')).getAllByRole('row')
-    // 1 header row + 6 data rows
-    expect(rows).toHaveLength(7)
+    // 1 header row + 7 data rows
+    expect(rows).toHaveLength(8)
   })
 
   it('sorts rows by a column header click (asc then desc)', async () => {
@@ -23,20 +23,20 @@ describe('OrdersPage', () => {
         .getAllByRole('link', { name: /View order \d+ details/ })
         .map((link) => link.textContent?.trim())
 
-    // Initial sort is Date desc (newest-first): 1002 & 1001 share 2025-09-12 (1002 first),
-    // then 1003, 1004, 1005, 1006.
-    expect(orderIds()).toEqual(['1002', '1001', '1003', '1004', '1005', '1006'])
+    // Initial sort is Date desc (newest-first): 1007 (2025-10-10) first, then 1002 & 1001
+    // share 2025-09-12 (1002 first), then 1003, 1004, 1005, 1006.
+    expect(orderIds()).toEqual(['1007', '1002', '1001', '1003', '1004', '1005', '1006'])
 
     // Click the Client header to sort ascending. TanStack's default comparator sorts the
     // null client (1006) first, then the named clients A->Z; ties keep prior order (1001
-    // before 1005).
+    // before 1005; 1007 is the only "Maintenance Co").
     fireEvent.click(screen.getByRole('button', { name: /^Client, not sorted/ }))
-    expect(orderIds()).toEqual(['1006', '1001', '1005', '1002', '1004', '1003'])
+    expect(orderIds()).toEqual(['1006', '1001', '1005', '1002', '1004', '1007', '1003'])
 
     // Click again -> descending: named clients Z->A, then the null client last; the two
     // "Client Alpha" rows keep their stable input order (1001 before 1005).
     fireEvent.click(screen.getByRole('button', { name: /^Client, sorted ascending/ }))
-    expect(orderIds()).toEqual(['1003', '1004', '1002', '1001', '1005', '1006'])
+    expect(orderIds()).toEqual(['1003', '1007', '1004', '1002', '1001', '1005', '1006'])
   })
 
   it('shows the New order button for editors', async () => {

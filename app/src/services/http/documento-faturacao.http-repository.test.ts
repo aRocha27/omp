@@ -45,6 +45,21 @@ describe('HttpDocumentoFaturacaoRepository', () => {
     vi.restoreAllMocks()
   })
 
+  describe('listTypes', () => {
+    it('GETs the live Tp_Doc_FT endpoint and returns descriptive options', async () => {
+      const types = [
+        { id: 'AcFT', label: 'Acerto Factura' },
+        { id: 'FT', label: 'Factura' },
+        { id: 'NC', label: 'Nota Crédito' },
+      ]
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, types }))
+
+      await expect(repo.listTypes()).resolves.toEqual(types)
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/orders/facturacao/types')
+      expect((fetchMock.mock.calls[0][1] as RequestInit)?.method).toBe('GET')
+    })
+  })
+
   describe('listByOrder', () => {
     it('GETs /orders/facturacao?orderId=N and returns the mapped rows', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, rows: [row] }))
@@ -128,9 +143,38 @@ describe('HttpDocumentoFaturacaoRepository', () => {
           N_Doc_FT: 'A22',
           Valor_Doc_FT: 66000,
           ID_User: 'dev',
-        }),
+        }, 'editor'),
       ).resolves.toEqual(row)
       expect(fetchMock).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('update', () => {
+    it('POSTs {id, patch} to /orders/facturacao/update and returns the row', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, row }))
+      await expect(repo.update(1, { ID_Tp_Doc_FT: 'NC' }, 'editor')).resolves.toEqual(row)
+      const init = fetchMock.mock.calls[0][1] as RequestInit
+      expect(init?.method).toBe('POST')
+      expect(init?.body).toBe(JSON.stringify({ id: 1, patch: { ID_Tp_Doc_FT: 'NC' } }))
+    })
+
+    it('maps a net-exceeding 422 to a server-error RepositoryError', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(422, { ok: false, code: 'validation', message: 'Net faturado > Sell Price.' }),
+      )
+      await expect(repo.update(1, { Valor_Doc_FT: 999999 }, 'editor')).rejects.toMatchObject({
+        kind: 'server-error',
+        message: 'Net faturado > Sell Price.',
+      })
+    })
+  })
+
+  describe('remove', () => {
+    it('POSTs {id} to /orders/facturacao/delete and resolves', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true }))
+      await expect(repo.remove(1, 'editor')).resolves.toBeUndefined()
+      const init = fetchMock.mock.calls[0][1] as RequestInit
+      expect(init?.body).toBe(JSON.stringify({ id: 1 }))
     })
   })
 })

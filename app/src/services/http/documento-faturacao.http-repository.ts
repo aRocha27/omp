@@ -1,22 +1,29 @@
 /**
  * HTTP DocumentoFaturação repository.
  *
- * Live read implementation of `DocumentoFaturacaoRepository` backed by the Node
- * API sub-table endpoint `GET /orders/facturacao?orderId=N`. Failures map to
- * `RepositoryError` so the order-detail Faturação tab renders unchanged.
- *
- * `add` is NOT supported live; live sub-table write is a flagged follow-up.
+ * Live read/write implementation of `DocumentoFaturacaoRepository` backed by the
+ * Node API. Document type options come from the runtime `dbo.Tp_Doc_FT` lookup;
+ * mutations are revalidated transactionally by the server. Failures map to
+ * `RepositoryError` so the order-detail Faturação tab handles mock and live failures
+ * consistently.
  */
 import { env } from '@/app/configuration/env'
 import type { DocumentoFaturacao } from '@/domain/models/documento-faturacao'
 import {
   RepositoryError,
+  type DocumentoFaturacaoPatch,
   type DocumentoFaturacaoRepository,
+  type DocumentoFaturacaoType,
   type NewDocumentoFaturacao,
 } from '@/services/contracts/documento-faturacao.repository'
+import type { Role } from '@/domain/models/user'
 
 type Row = DocumentoFaturacao
 
+interface OkTypesResponse {
+  ok: true
+  types: DocumentoFaturacaoType[]
+}
 interface OkRowsResponse {
   ok: true
   rows: Row[]
@@ -28,6 +35,12 @@ interface ApiFailure {
 }
 
 export class HttpDocumentoFaturacaoRepository implements DocumentoFaturacaoRepository {
+  async listTypes(): Promise<DocumentoFaturacaoType[]> {
+    const data = await getJson<OkTypesResponse | ApiFailure>('/orders/facturacao/types')
+    if (!data.ok) throw toRepositoryError(data, 500)
+    return data.types.map((type) => ({ ...type }))
+  }
+
   async listByOrder(orderId: number): Promise<DocumentoFaturacao[]> {
     const data = await getJson<OkRowsResponse | ApiFailure>(
       `/orders/facturacao?orderId=${orderId}`,
@@ -36,10 +49,33 @@ export class HttpDocumentoFaturacaoRepository implements DocumentoFaturacaoRepos
     return data.rows.map(toDocumentoFaturacao)
   }
 
-  async add(entry: NewDocumentoFaturacao, role = 'editor'): Promise<DocumentoFaturacao> {
+  async add(entry: NewDocumentoFaturacao, role: Role): Promise<DocumentoFaturacao> {
     const data = await postJson<{ ok: true; row: Row } | ApiFailure>('/orders/facturacao', entry, role)
     if (!data.ok) throw toRepositoryError(data, 422)
     return toDocumentoFaturacao(data.row)
+  }
+
+  async update(
+    id: number,
+    patch: DocumentoFaturacaoPatch,
+    role: Role,
+  ): Promise<DocumentoFaturacao> {
+    const data = await postJson<{ ok: true; row: Row } | ApiFailure>(
+      '/orders/facturacao/update',
+      { id, patch },
+      role,
+    )
+    if (!data.ok) throw toRepositoryError(data, 422)
+    return toDocumentoFaturacao(data.row)
+  }
+
+  async remove(id: number, role: Role): Promise<void> {
+    const data = await postJson<{ ok: true } | ApiFailure>(
+      '/orders/facturacao/delete',
+      { id },
+      role,
+    )
+    if (!data.ok) throw toRepositoryError(data, 422)
   }
 }
 

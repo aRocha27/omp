@@ -118,6 +118,7 @@ function toOrder(row: DetailRow): Order {
     Client_Name: row.Client_Name ?? null,
     ID_Area: row.ID_Area,
     ID_Tipo: row.ID_Tipo,
+    Tipo_Warranty: row.Tipo_Warranty ?? null,
     ID_Produto: row.ID_Produto,
     ID_Instrumento: row.ID_Instrumento,
     Orc_Proposta: row.Orc_Proposta,

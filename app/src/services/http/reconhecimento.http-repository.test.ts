@@ -126,9 +126,56 @@ describe('HttpReconhecimentoRepository', () => {
           DT_Reconhecimento: '2025-09-12T00:00:00.000Z',
           Valor_Reconhecimento: 5000,
           ID_User: 'dev',
-        }),
+        }, 'editor'),
       ).resolves.toEqual(row)
       expect(fetchMock).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('update', () => {
+    it('POSTs {id, patch} to /orders/reconhecimentos/update and returns the row', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, row }))
+      await expect(repo.update(11, { Valor_Reconhecimento: 9000 }, 'editor')).resolves.toEqual(row)
+      const init = fetchMock.mock.calls[0][1] as RequestInit
+      expect(init?.method).toBe('POST')
+      expect(init?.body).toBe(JSON.stringify({ id: 11, patch: { Valor_Reconhecimento: 9000 } }))
+    })
+
+    it('maps a capacity-exceeded 422 to a server-error RepositoryError', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(422, { ok: false, code: 'validation', message: 'Excede o Sell Price.' }),
+      )
+      await expect(repo.update(11, { Valor_Reconhecimento: 999999 }, 'editor')).rejects.toMatchObject({
+        kind: 'server-error',
+        message: 'Excede o Sell Price.',
+      })
+    })
+  })
+
+  describe('remove', () => {
+    it('POSTs {id} to /orders/reconhecimentos/delete and resolves', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true }))
+      await expect(repo.remove(11, 'editor')).resolves.toBeUndefined()
+      const init = fetchMock.mock.calls[0][1] as RequestInit
+      expect(init?.body).toBe(JSON.stringify({ id: 11 }))
+    })
+  })
+
+  describe('propagate', () => {
+    it('POSTs to /orders/reconhecimentos/propagate and returns the created rows', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, rows: [row] }))
+      await expect(repo.propagate(1001, { kind: 'warranty' }, 'editor')).resolves.toEqual([row])
+      const init = fetchMock.mock.calls[0][1] as RequestInit
+      expect(init?.body).toBe(JSON.stringify({ orderId: 1001, kind: 'warranty' }))
+    })
+
+    it('sends startDate/years for a maintenance propagation', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, rows: [] }))
+      await repo.propagate(1006, { kind: 'maintenance', startDate: '2025-01-01', years: 2 }, 'editor')
+      const init = fetchMock.mock.calls[0][1] as RequestInit
+      expect(init?.body).toBe(
+        JSON.stringify({ orderId: 1006, kind: 'maintenance', startDate: '2025-01-01', years: 2 }),
+      )
     })
   })
 })
