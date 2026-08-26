@@ -2,6 +2,7 @@ import type { Response } from 'express'
 import { ZodError } from 'zod'
 import type { ConnectionPool } from 'mssql'
 import {
+  ClientNotFoundError,
   DatabaseRowNotFoundError,
   FacturacaoCapacityError,
   PropagationValidationError,
@@ -82,6 +83,13 @@ export function sendError(response: Response, error: unknown): void {
 
   if (error instanceof DatabaseRowNotFoundError) {
     response.status(404).json({ ok: false, code: 'not-found', message: error.message })
+    return
+  }
+
+  if (error instanceof ClientNotFoundError) {
+    logger.warn('request rejected', { code: 'validation', message: error.message })
+    const payload: Err = { ok: false, code: 'validation', message: error.message }
+    response.status(400).json(payload)
     return
   }
 

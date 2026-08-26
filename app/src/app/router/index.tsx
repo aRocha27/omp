@@ -6,7 +6,9 @@ import { OrdersPage } from '@/features/orders/orders-page'
 import { OrderDetailPage } from '@/features/orders/components/order-detail-page'
 import { ClientsPage } from '@/features/clients/clients-page'
 import { ClientDetailPage } from '@/features/clients/components/client-detail-page'
+import { ClientCreatePage } from '@/features/clients/components/client-create-page'
 import { AdministrationPage } from '@/features/administration/administration-page'
+import { RecognitionPage } from '@/features/recognition/recognition-page'
 import { PlaceholderPage } from '@/components/layout/placeholder-page'
 import { OrderCreatePage } from '@/features/orders/components/order-create-page'
 
@@ -22,6 +24,7 @@ export const router = createBrowserRouter([
       },
       { path: '/orders/:id', element: <OrderDetailPage /> },
       { path: '/clients', element: <ClientsPage /> },
+      { path: '/clients/new', element: <ClientCreatePage /> },
       { path: '/clients/:id', element: <ClientDetailPage /> },
       {
         path: '/invoicing',
@@ -34,12 +37,7 @@ export const router = createBrowserRouter([
       },
       {
         path: '/recognition',
-        element: (
-          <PlaceholderPage
-            title="Recognition"
-            description="Revenue recognition rules land in a later slice."
-          />
-        ),
+        element: <RecognitionPage />,
       },
       {
         path: '/stock',

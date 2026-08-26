@@ -60,6 +60,13 @@ export function toOrderSummary(order: Order): OrderSummary {
     Sell_Price: order.Sell_Price,
     Negocio_Fechado: order.Negocio_Fechado,
     Encomenda_Cli_PHC: order.Encomenda_Cli_PHC,
+    Kit: order.Kit,
+    ID_Tp_Warranty: order.ID_Tp_Warranty,
+    Warranty_Reserve: order.Warranty_Reserve,
+    Warranty_DT_Inicio: order.Warranty_DT_Inicio,
+    Orc_Proposta: order.Orc_Proposta,
+    PO_Cliente: order.PO_Cliente,
+    ID_Tp_Revenue: order.ID_Tp_Revenue,
   }
 }
 

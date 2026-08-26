@@ -49,17 +49,22 @@ export type ReconhecimentoPatch = Partial<
  *
  * `kind: 'maintenance'` generates `CM` (C Manut) lines for a Maintenance
  * Contract order (`ID_Tipo === 'CM'`), dividing `Sell_Price` by
- * `years × 12` months starting at `startDate`. The contract start and number
- * of years are not persisted (the DB has no columns for them), so they must be
- * supplied each time.
+ * `years × 12` months starting at `startDate`. Installments whose scheduled
+ * month has already elapsed are dated in the `recognitionDate` month (catch-up);
+ * later installments keep their schedule. These values are not persisted on the
+ * order, so they must be supplied each time.
  */
-export interface PropagateReconhecimentoInput {
-  kind: 'warranty' | 'maintenance'
-  /** Required for `kind: 'maintenance'` — ISO 8601 UTC date of the contract start. */
-  startDate?: string
-  /** Required for `kind: 'maintenance'` — contract duration in years (≥ 1). */
-  years?: number
-}
+export type PropagateReconhecimentoInput =
+  | { kind: 'warranty' }
+  | {
+      kind: 'maintenance'
+      /** ISO 8601 UTC date of the contract start. */
+      startDate: string
+      /** Contract duration in years (integer, 1–100). */
+      years: number
+      /** ISO 8601 UTC date on which catch-up recognition is entered. */
+      recognitionDate: string
+    }
 
 /**
  * Read + write path for a single order's recognition entries.

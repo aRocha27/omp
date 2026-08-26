@@ -1,9 +1,15 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { screen, within, fireEvent } from '@testing-library/react'
 import { OrdersPage } from '@/features/orders/orders-page'
 import { renderWithProviders } from '@/test/render-with-providers'
 
 describe('OrdersPage', () => {
+  // OrdersPage persists the active filters to localStorage so a detail visit and back
+  // restores them. Each test must start from a clean store, otherwise a previous test's
+  // filters leak in and narrow the list before the test's own filters apply.
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
   it('renders fixture rows ordered newest-first', async () => {
     renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
 
@@ -64,11 +70,11 @@ describe('OrdersPage', () => {
     expect(screen.queryByText('Client Beta')).not.toBeInTheDocument()
   })
 
-  it('narrows results when filtering by PHC ref', async () => {
+  it('narrows results when filtering by SAP ref', async () => {
     renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
     await screen.findByRole('table')
 
-    const phcInput = screen.getByPlaceholderText('Search PHC ref')
+    const phcInput = screen.getByPlaceholderText('Search SAP Order')
     fireEvent.change(phcInput, { target: { value: '1001' } })
 
     // Contains, case-insensitive: '1001' matches 'PHC-1001' only.
@@ -134,6 +140,50 @@ describe('OrdersPage', () => {
     expect(screen.getByRole('checkbox', { name: 'Comercial' })).toBeInTheDocument()
     // Text filters remain <input> associated by label.
     expect(screen.getByPlaceholderText('Search client').tagName).toBe('INPUT')
-    expect(screen.getByPlaceholderText('Search PHC ref').tagName).toBe('INPUT')
+    expect(screen.getByPlaceholderText('Search SAP Order').tagName).toBe('INPUT')
+  })
+
+  it('exposes a resize handle on each column header', async () => {
+    renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    await screen.findByRole('table')
+
+    // The resize handle is a labelled separator so it is reachable by assistive tech.
+    expect(screen.getByRole('separator', { name: 'Resize Client' })).toBeInTheDocument()
+    expect(screen.getByRole('separator', { name: 'Resize Sell price' })).toBeInTheDocument()
+  })
+
+  it('renders the Deal closed flag as a read-only checkbox reflecting the order state', async () => {
+    renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    await screen.findByRole('table')
+
+    // The list grid only displays flags — editing happens on the detail page — so the
+    // checkbox is always disabled and its checked state mirrors the order's flag.
+    const name = 'Deal closed order 1001'
+    const checkbox = screen.getByRole('checkbox', { name }) as HTMLInputElement
+    expect(checkbox).toBeDisabled()
+    // Order 1001 starts with the deal open (Negocio_Fechado === false).
+    expect(checkbox).not.toBeChecked()
+  })
+
+  it('persists filters across a remount (detail visit and back)', async () => {
+    const { unmount } = renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    await screen.findByRole('table')
+    fireEvent.change(screen.getByPlaceholderText('Search client'), {
+      target: { value: 'Alpha' },
+    })
+    // Two fixtures share "Client Alpha" (1001, 1005); both remain.
+    await screen.findAllByText('Client Alpha')
+    expect(screen.queryByText('Client Beta')).not.toBeInTheDocument()
+
+    unmount()
+
+    // A fresh mount (simulating navigate to a detail and back) restores the saved
+    // filters from localStorage without the user re-entering anything.
+    renderWithProviders(<OrdersPage />, { initialPath: '/orders' })
+    expect((screen.getByPlaceholderText('Search client') as HTMLInputElement).value).toBe(
+      'Alpha',
+    )
+    await screen.findAllByText('Client Alpha')
+    expect(screen.queryByText('Client Beta')).not.toBeInTheDocument()
   })
 })

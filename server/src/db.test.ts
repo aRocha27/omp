@@ -7,9 +7,11 @@ import {
   addReconhecimento,
   deleteFacturacao,
   deleteReconhecimento,
+  fetchDashboardSnapshot,
   fetchFacturacaoTypes,
   fetchOrderById,
   fetchOrderSummaries,
+  fetchRecognitionQueue,
   fetchRows,
   isHistoricoRow,
   isLockedCaracterizacaoField,
@@ -20,6 +22,8 @@ import {
   updateFacturacao,
   updateOrder,
   updateReconhecimento,
+  createOrder,
+  ClientNotFoundError,
 } from './db.js'
 
 // mssql is CommonJS; load it the same way db.ts does so the type constants (Int, NVarChar,
@@ -164,20 +168,24 @@ describe('Orders list query', () => {
     )
 
     // Half-open upper bound: dateTo uses DATEADD, never <=.
-    expect(captured.sql).toContain('DT_Order >= @dateFrom')
-    expect(captured.sql).toContain('DT_Order < DATEADD(day, 1, @dateTo)')
-    expect(captured.sql).toContain('nome LIKE @clientName')
-    expect(captured.sql).toContain('Order_Factory = @orderFactory')
-    expect(captured.sql).toContain('Negocio_Fechado = @negocioFechado')
+    expect(captured.sql).toContain('v.DT_Order >= @dateFrom')
+    expect(captured.sql).toContain('v.DT_Order < DATEADD(day, 1, @dateTo)')
+    expect(captured.sql).toContain('v.nome LIKE @clientName')
+    expect(captured.sql).toContain('v.Order_Factory = @orderFactory')
+    expect(captured.sql).toContain('v.Negocio_Fechado = @negocioFechado')
     // Categorical multi-select filters expand to parameterized IN (@p0, …) clauses.
-    expect(captured.sql).toContain('ID_Tp_Order IN (@idTpOrder0)')
-    expect(captured.sql).toContain('ID_Area IN (@idArea0)')
-    expect(captured.sql).toContain('ID_Tipo IN (@idTipo0)')
-    expect(captured.sql).toContain('ID_Produto IN (@idProduto0)')
-    expect(captured.sql).toContain('ID_Instrumento IN (@idInstrumento0)')
-    expect(captured.sql).toContain('Encomenda_Cli_PHC LIKE @encomendaCliPHC')
-    expect(captured.sql).toContain('ORDER BY DT_Order DESC, ID_Order DESC')
-    expect(captured.sql).toContain('FROM [dbo].[V_Order_List]')
+    expect(captured.sql).toContain('v.ID_Tp_Order IN (@idTpOrder0)')
+    expect(captured.sql).toContain('v.ID_Area IN (@idArea0)')
+    expect(captured.sql).toContain('v.ID_Tipo IN (@idTipo0)')
+    expect(captured.sql).toContain('v.ID_Produto IN (@idProduto0)')
+    expect(captured.sql).toContain('v.ID_Instrumento IN (@idInstrumento0)')
+    expect(captured.sql).toContain('v.Encomenda_Cli_PHC LIKE @encomendaCliPHC')
+    expect(captured.sql).toContain('ORDER BY v.DT_Order DESC, v.ID_Order DESC')
+    expect(captured.sql).toContain('FROM [dbo].[V_Order_List] AS v')
+    // The 7 Order-table-only columns are joined from dbo.[Order] so the list grid can
+    // render them without a per-row detail fetch.
+    expect(captured.sql).toContain('LEFT JOIN [dbo].[Order] AS o ON o.ID_Order = v.ID_Order')
+    expect(captured.sql).toContain('o.Kit, o.ID_Tp_Warranty')
     // Provisoria bit column is projected from the view and coerced to a boolean.
     expect(captured.sql).toContain('Provisoria')
 
@@ -217,7 +225,7 @@ describe('Orders list query', () => {
     const { pool, captured } = capturingPool([])
     await fetchOrderSummaries(pool, {}, 10)
     expect(captured.sql).not.toContain('WHERE')
-    expect(captured.sql).toContain('ORDER BY DT_Order DESC, ID_Order DESC')
+    expect(captured.sql).toContain('ORDER BY v.DT_Order DESC, v.ID_Order DESC')
   })
 
   it('coerces numeric bit columns to booleans and leaves nulls null', async () => {
@@ -274,6 +282,234 @@ describe('Orders list query', () => {
     const rows = await fetchOrderSummaries(pool, {}, 10)
     // ISO on the wire, never a Date.toString() locale dump (TIMEZONE.md).
     expect(rows[0].DT_Order).toBe('2022-10-26T00:00:00.000Z')
+  })
+})
+
+describe('Dashboard snapshot queries', () => {
+  it('aggregates KPI totals, zero-fills the current-year trend, and maps the recognition queue', async () => {
+    const pool = poolReturning(
+      {
+        recordset: [
+          {
+            ordersBookedYtd: 8,
+            nobYtd: 125000,
+            revenueRecognizedYtd: 82000,
+            backlogToRecognize: 43000,
+            backlogAtPeriodStart: 51000,
+          },
+        ],
+      },
+      {
+        recordset: [
+          { month_num: 1, revenue: 1000, nob: 2000 },
+          { month_num: 8, revenue: 8000, nob: 9000 },
+        ],
+      },
+      {
+        recordset: [
+          {
+            ID_Order: 1001,
+            encPhc: '5052310',
+            orderDate: new Date('2026-08-25T00:00:00.000Z'),
+            client: 'Client Alpha',
+            area: 'BDAL',
+            product: 'ESI TOF',
+            type: 'INSTRUMENT',
+            sellPrice: 18500,
+            recognizedValue: 11562,
+            remainingValue: 6938,
+            invoiced: 0,
+          },
+        ],
+      },
+      {
+        recordset: [
+          {
+            ID_Order: 101,
+            DT_Order: new Date('2026-08-23T00:00:00.000Z'),
+            Order_Factory: 0,
+            ID_Tp_Order: 'C',
+            ID_Client: 93,
+            Client_Name: 'ITQB Noval',
+            ID_Area: 'BDAL',
+            ID_Tipo: 'INSTR',
+            ID_Produto: 2,
+            ID_Instrumento: 1,
+            Sell_Price: 12500,
+            Negocio_Fechado: 1,
+            Encomenda_Cli_PHC: 'PHC-001',
+            Kit: 0,
+            ID_Tp_Warranty: 2,
+            Warranty_Reserve: 500,
+            Warranty_DT_Inicio: new Date('2026-01-01T00:00:00.000Z'),
+            Orc_Proposta: 'PROP-12000',
+            PO_Cliente: 'PO-1',
+            ID_Tp_Revenue: 1,
+            Provisoria: 0,
+          },
+        ],
+      },
+    )
+
+    const snapshot = await fetchDashboardSnapshot(pool, new Date('2026-08-26T12:00:00.000Z'))
+
+    expect(snapshot.year).toBe(2026)
+    expect(snapshot.kpis).toEqual({
+      ordersBookedYtd: 8,
+      nobYtd: 125000,
+      revenueRecognizedYtd: 82000,
+      backlogToRecognize: 43000,
+      backlogAtPeriodStart: 51000,
+    })
+    expect(snapshot.monthlyTrend).toHaveLength(8)
+    expect(snapshot.monthlyTrend[0]).toEqual({
+      monthStart: '2026-01-01T00:00:00.000Z',
+      revenue: 1000,
+      nob: 2000,
+    })
+    expect(snapshot.monthlyTrend[1]).toEqual({
+      monthStart: '2026-02-01T00:00:00.000Z',
+      revenue: 0,
+      nob: 0,
+    })
+    expect(snapshot.monthlyTrend[7]).toEqual({
+      monthStart: '2026-08-01T00:00:00.000Z',
+      revenue: 8000,
+      nob: 9000,
+    })
+    expect(snapshot.recognitionQueue).toEqual([
+      {
+        idOrder: 1001,
+        encPhc: '5052310',
+        orderDate: '2026-08-25T00:00:00.000Z',
+        client: 'Client Alpha',
+        area: 'BDAL',
+        product: 'ESI TOF',
+        type: 'INSTRUMENT',
+        sellPrice: 18500,
+        recognizedValue: 11562,
+        remainingValue: 6938,
+        invoiced: false,
+      },
+    ])
+    expect(snapshot.recentOrders).toHaveLength(1)
+    expect(snapshot.recentOrders[0].ID_Order).toBe(101)
+  })
+
+  it('builds the KPI query with Client-only YTD metrics, current backlog, and opening backlog', async () => {
+    const captured: Array<{ sql: string; inputs: CapturedInput[] }> = []
+    const queryQueue = [
+      { recordset: [{ ordersBookedYtd: 1, nobYtd: 2, revenueRecognizedYtd: 3, backlogToRecognize: 4, backlogAtPeriodStart: 5 }] },
+      { recordset: [] },
+      { recordset: [] },
+      { recordset: [] },
+    ]
+    const pool = {
+      request: vi.fn(() => {
+        const next = queryQueue.shift()
+        if (!next) throw new Error('Missing dashboard query result.')
+        const current = { sql: '', inputs: [] as CapturedInput[] }
+        captured.push(current)
+        const request = {
+          input: vi.fn((name: string, type: unknown, value: unknown) => {
+            current.inputs.push({ name, type, value })
+            return request
+          }),
+          query: vi.fn(async (sql: string) => {
+            current.sql = sql
+            return next
+          }),
+        }
+        return request
+      }),
+    } as unknown as ConnectionPool
+
+    await fetchDashboardSnapshot(pool, new Date('2026-08-26T12:00:00.000Z'))
+
+    const kpiQuery = captured[0]
+    expect(kpiQuery.inputs).toEqual([
+      { name: 'yearStart', type: mssql.DateTime, value: new Date('2026-01-01T00:00:00.000Z') },
+      { name: 'todayCutoff', type: mssql.DateTime, value: new Date('2026-08-26T12:00:00.000Z') },
+    ])
+    expect(kpiQuery.sql).toContain("DT_Order >= @yearStart AND DT_Order < @todayCutoff AND ID_Tp_Order = 'C') AS nobYtd")
+    expect(kpiQuery.sql).toContain('INNER JOIN [dbo].[Order] AS o ON o.ID_Order = r.ID_Order')
+    expect(kpiQuery.sql).toContain("r.DT_Reconhecimento >= @yearStart AND r.DT_Reconhecimento < @todayCutoff AND o.ID_Tp_Order = 'C') AS revenueRecognizedYtd")
+    expect(kpiQuery.sql).toContain('AS backlogToRecognize')
+    expect(kpiQuery.sql).toContain("WHERE o.DT_Order >= @yearStart AND o.DT_Order < @todayCutoff AND o.ID_Tp_Order = 'C')")
+    expect(kpiQuery.sql).toContain("WHERE o.DT_Order < @yearStart AND o.ID_Tp_Order = 'C')")
+    expect(kpiQuery.sql).toContain("WHERE o.DT_Order < @yearStart AND o.ID_Tp_Order = 'C' AND r.DT_Reconhecimento < @yearStart)")
+    expect(kpiQuery.sql).toContain('AS backlogAtPeriodStart')
+    expect(kpiQuery.sql).not.toContain('[11-Reconhecimento-PorReconhecer]')
+  })
+})
+
+describe('fetchRecognitionQueue', () => {
+  it('returns every positive remaining row from the recognition backlog view', async () => {
+    const { pool, captured } = capturingPool([
+      {
+        ID_Order: 1001,
+        encPhc: '5052310',
+        orderDate: '2026-08-25T00:00:00.000Z',
+        client: 'Client Alpha',
+        area: 'BDAL',
+        product: 'ESI TOF',
+        type: 'INSTRUMENT',
+        sellPrice: 18500,
+        recognizedValue: 11562,
+        remainingValue: 6938,
+        invoiced: false,
+      },
+      {
+        ID_Order: 1003,
+        encPhc: '5052999',
+        orderDate: '2026-08-12T00:00:00.000Z',
+        client: 'Client Beta',
+        area: 'BOPT',
+        product: 'XRF',
+        type: 'ACESSORIES',
+        sellPrice: 87000,
+        recognizedValue: 54000,
+        remainingValue: 33000,
+        invoiced: true,
+      },
+    ])
+
+    const rows = await fetchRecognitionQueue(pool)
+
+    expect(rows).toEqual([
+      {
+        idOrder: 1001,
+        encPhc: '5052310',
+        orderDate: '2026-08-25T00:00:00.000Z',
+        client: 'Client Alpha',
+        area: 'BDAL',
+        product: 'ESI TOF',
+        type: 'INSTRUMENT',
+        sellPrice: 18500,
+        recognizedValue: 11562,
+        remainingValue: 6938,
+        invoiced: false,
+      },
+      {
+        idOrder: 1003,
+        encPhc: '5052999',
+        orderDate: '2026-08-12T00:00:00.000Z',
+        client: 'Client Beta',
+        area: 'BOPT',
+        product: 'XRF',
+        type: 'ACESSORIES',
+        sellPrice: 87000,
+        recognizedValue: 54000,
+        remainingValue: 33000,
+        invoiced: true,
+      },
+    ])
+    expect(captured.sql).toContain('FROM [dbo].[11-Reconhecimento-PorReconhecer] AS v')
+    expect(captured.sql).toContain(
+      'LEFT JOIN [dbo].[Order] AS o ON o.Encomenda_Cli_PHC = v.[Enc PHC]',
+    )
+    expect(captured.sql).toContain('COALESCE(v.[Valor por Reconhecer], 0) > 0')
+    expect(captured.sql).not.toContain('TOP')
   })
 })
 
@@ -378,6 +614,39 @@ describe('Order detail query', () => {
     expect(order?.DT_Order).toBe('2022-10-26T00:00:00.000Z')
     expect(order?.Warranty_DT_Inicio).toBe('2026-01-01T00:00:00.000Z')
     expect(order?.DT_User).toBe('2026-08-23T00:00:00.000Z')
+  })
+})
+
+describe('createOrder', () => {
+  const validInput = {
+    DT_Order: '2026-08-25',
+    ID_Tp_Order: 'C',
+    ID_Client: 93,
+    ID_Area: 'BDAL',
+    ID_Tipo: 'INSTR',
+    ID_Produto: 2,
+    ID_Tp_Revenue: 1,
+  } as const
+
+  it('throws ClientNotFoundError before INSERT when the client does not exist', async () => {
+    // The existence probe (first query) returns an empty recordset — the INSERT must never run.
+    const { pool } = capturingPool([])
+    await expect(createOrder(pool, validInput, 'arocha')).rejects.toBeInstanceOf(
+      ClientNotFoundError,
+    )
+  })
+
+  it('runs the existence check against dbo.Client before the INSERT', async () => {
+    // capturingPool overwrites captured.sql with the LAST query, so after a successful probe the
+    // captured SQL is the INSERT. If the existence check had thrown (no client), the INSERT would
+    // never run and captured.sql would be the SELECT — so asserting the INSERT ran proves the
+    // probe passed first. The INSERT mock returns an empty recordset (no id), so createOrder
+    // throws downstream — that is expected and irrelevant to this assertion.
+    const { pool, captured } = capturingPool([{ '': 1 }])
+    await expect(createOrder(pool, validInput, 'arocha')).rejects.toThrow(
+      'did not return the new order identifier',
+    )
+    expect(captured.sql).toContain('INSERT INTO [dbo].[Order]')
   })
 })
 
@@ -810,7 +1079,7 @@ describe('Recognition mutations', () => {
       DT_Reconhecimento: new Date(Date.UTC(2027, 1 + index, 1)),
       Valor_Reconhecimento: 50,
     }))
-    const { pool } = transactionPool(
+    const { pool, captured } = transactionPool(
       {
         recordset: [
           {
@@ -830,7 +1099,13 @@ describe('Recognition mutations', () => {
 
     const rows = await propagateReconhecimento(
       pool,
-      { orderId: 101, kind: 'maintenance', startDate: '2027-02-18', years: 2 },
+      {
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 2,
+        recognitionDate: '2027-02-18',
+      },
       'editor',
     )
     expect(rows).toHaveLength(24)
@@ -839,6 +1114,68 @@ describe('Recognition mutations', () => {
       DT_Reconhecimento: '2027-02-01T00:00:00.000Z',
       Valor_Reconhecimento: 50,
     })
+    const dates = captured[2]?.inputs
+      .filter((input) => input.name.startsWith('date'))
+      .map((input) => (input.value as Date).toISOString())
+    expect(dates?.[0]).toBe('2027-02-01T00:00:00.000Z')
+    expect(dates?.[23]).toBe('2029-01-01T00:00:00.000Z')
+  })
+
+  it('moves elapsed maintenance rows to the recognition month', async () => {
+    const expectedDates = [
+      ...Array.from({ length: 6 }, () => '2026-06-01T00:00:00.000Z'),
+      '2026-07-01T00:00:00.000Z',
+      '2026-08-01T00:00:00.000Z',
+      '2026-09-01T00:00:00.000Z',
+      '2026-10-01T00:00:00.000Z',
+      '2026-11-01T00:00:00.000Z',
+      '2026-12-01T00:00:00.000Z',
+    ]
+    const inserted = expectedDates.map((date, index) => ({
+      ...current,
+      ID_Reconhecimento: 300 + index,
+      ID_Tp_Reconhecimento: 'CM',
+      DT_Reconhecimento: new Date(date),
+      Valor_Reconhecimento: 1000,
+    }))
+    const { pool, captured } = transactionPool(
+      {
+        recordset: [
+          {
+            ID_Order: 101,
+            ID_Tipo: 'CM',
+            Tipo_Warranty: 0,
+            Sell_Price: 12000,
+            Warranty_Reserve: null,
+            Warranty_DT_Inicio: null,
+            N_Anos: null,
+          },
+        ],
+      },
+      { recordset: [] },
+      { recordset: inserted, rowsAffected: [12] },
+    )
+
+    const rows = await propagateReconhecimento(
+      pool,
+      {
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2026-01-15',
+        years: 1,
+        recognitionDate: '2026-06-25',
+      },
+      'editor',
+    )
+
+    const boundDates = captured[2]?.inputs
+      .filter((input) => input.name.startsWith('date'))
+      .map((input) => (input.value as Date).toISOString())
+    expect(boundDates).toEqual(expectedDates)
+    expect(rows).toHaveLength(12)
+    expect(rows.reduce((sum, row) => sum + (row.Valor_Reconhecimento ?? 0), 0)).toBe(
+      12000,
+    )
   })
 })
 

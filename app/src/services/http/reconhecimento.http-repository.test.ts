@@ -169,12 +169,27 @@ describe('HttpReconhecimentoRepository', () => {
       expect(init?.body).toBe(JSON.stringify({ orderId: 1001, kind: 'warranty' }))
     })
 
-    it('sends startDate/years for a maintenance propagation', async () => {
+    it('sends startDate/years/recognitionDate for a maintenance propagation', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, rows: [] }))
-      await repo.propagate(1006, { kind: 'maintenance', startDate: '2025-01-01', years: 2 }, 'editor')
+      await repo.propagate(
+        1006,
+        {
+          kind: 'maintenance',
+          startDate: '2025-01-01',
+          years: 2,
+          recognitionDate: '2025-06-15',
+        },
+        'editor',
+      )
       const init = fetchMock.mock.calls[0][1] as RequestInit
       expect(init?.body).toBe(
-        JSON.stringify({ orderId: 1006, kind: 'maintenance', startDate: '2025-01-01', years: 2 }),
+        JSON.stringify({
+          orderId: 1006,
+          kind: 'maintenance',
+          startDate: '2025-01-01',
+          years: 2,
+          recognitionDate: '2025-06-15',
+        }),
       )
     })
   })

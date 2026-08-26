@@ -52,10 +52,10 @@ export class MockDocumentoFaturacaoRepository implements DocumentoFaturacaoRepos
 
   async add(entry: NewDocumentoFaturacao, role: Role): Promise<DocumentoFaturacao> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para alterar documentos.')
+    assertMockMutationRole(role, 'No permission to change documents.')
     const order = this.store.orders.find((row) => row.ID_Order === entry.ID_Order)
     if (!order) {
-      throw new RepositoryError('not-found', 'Pedido não encontrado.')
+      throw new RepositoryError('not-found', 'Order not found.')
     }
     assertNetInvoicingCapacity(
       order,
@@ -78,18 +78,18 @@ export class MockDocumentoFaturacaoRepository implements DocumentoFaturacaoRepos
     role: Role,
   ): Promise<DocumentoFaturacao> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para alterar documentos.')
+    assertMockMutationRole(role, 'No permission to change documents.')
     const current = this.rows.find((row) => row.ID_Facturacao === id)
     if (!current) {
-      throw new RepositoryError('not-found', 'Documento não encontrado.')
+      throw new RepositoryError('not-found', 'Document not found.')
     }
     const value = patch.Valor_Doc_FT ?? current.Valor_Doc_FT
     if (value === null) {
-      throw new RepositoryError('server-error', 'O valor do documento é obrigatório.')
+      throw new RepositoryError('server-error', 'Document value is required.')
     }
     const order = this.store.orders.find((row) => row.ID_Order === current.ID_Order)
     if (!order) {
-      throw new RepositoryError('not-found', 'Pedido não encontrado.')
+      throw new RepositoryError('not-found', 'Order not found.')
     }
     assertNetInvoicingCapacity(
       order,
@@ -105,10 +105,10 @@ export class MockDocumentoFaturacaoRepository implements DocumentoFaturacaoRepos
 
   async remove(id: number, role: Role): Promise<void> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para alterar documentos.')
+    assertMockMutationRole(role, 'No permission to change documents.')
     const index = this.rows.findIndex((row) => row.ID_Facturacao === id)
     if (index === -1) {
-      throw new RepositoryError('not-found', 'Documento não encontrado.')
+      throw new RepositoryError('not-found', 'Document not found.')
     }
     // Hard delete — dbo.Facturacao has no deleted_at column (DB cannot change).
     this.rows.splice(index, 1)

@@ -8,14 +8,15 @@
  *
  * Warranty propagation (req 10, only when `Tipo.Warranty` is true):
  *   meses = (N_Anos − 1) × 12        — 1-year warranty → 0 lines
- *   início = Warranty_DT_Inicio + 12 months (first of month)
+ *   start = Warranty_DT_Inicio + 12 months (first of month)
  *   mensal = Warranty_Reserve / meses
  *   type = "WP" (Warranty Parcial)
  *
  * Maintenance Contract propagation (req 12, only when `ID_Tipo === "CM"`):
  *   meses = years × 12
  *   mensal = Sell_Price / meses
- *   início = startDate (first of month)
+ *   start = startDate (first of month)
+ *   catch-up = parcelas vencidas usam recognitionDate (first of month)
  *   type = "CM" (C Manut)
  *
  * Dates are emitted as ISO 8601 UTC on the first of each month. Values preserve
@@ -78,38 +79,53 @@ export function planWarrantyPropagation(order: WarrantyPropagationOrder): Propag
 /**
  * Plan the maintenance-contract (CM) recognition lines for an order. Returns an
  * empty array for a non-CM order or a non-positive Sell_Price. Throws when
- * `startDate`/`years` are missing or `years` < 1 — these come from the
- * propagation dialog and are required for a CM order.
+ * `startDate`/`years`/`recognitionDate` are missing or invalid — these come from
+ * the propagation dialog and are required for a CM order.
  */
 export function planMaintenancePropagation(
   order: MaintenancePropagationOrder,
   startDate: string | undefined,
   years: number | undefined,
+  recognitionDate: string | undefined,
 ): PropagationLine[] {
   if (order.ID_Tipo !== 'CM') return []
   if (order.Sell_Price === null || order.Sell_Price <= 0) return []
   if (
     startDate === undefined ||
+    recognitionDate === undefined ||
     years === undefined ||
     !Number.isInteger(years) ||
     years < 1 ||
     years > 100
   ) {
-    throw new Error('Início do contrato e nº de anos inteiro entre 1 e 100 são obrigatórios.')
+    throw new Error(
+      'Contract start, recognition date and a whole number of years between 1 and 100 are required.',
+    )
   }
   const startDateValue = new Date(startDate)
   if (Number.isNaN(startDateValue.getTime())) {
-    throw new Error('A data de início do contrato é inválida.')
+    throw new Error('Contract start date is invalid.')
+  }
+  const recognitionDateValue = new Date(recognitionDate)
+  if (Number.isNaN(recognitionDateValue.getTime())) {
+    throw new Error('Recognition date is invalid.')
   }
 
   const months = years * 12
   const values = allocateMoney(order.Sell_Price, months)
-  const start = firstOfMonth(startDateValue)
-  return values.map((value, i) => ({
-    type: 'CM',
-    date: addMonths(start, i).toISOString(),
-    value,
-  }))
+  const contractStart = firstOfMonth(startDateValue)
+  const recognitionMonth = firstOfMonth(recognitionDateValue)
+  return values.map((value, i) => {
+    const scheduled = addMonths(contractStart, i)
+    return {
+      type: 'CM',
+      date:
+        scheduled.getTime() < recognitionMonth.getTime()
+          ? recognitionMonth.toISOString()
+          : scheduled.toISOString(),
+      value,
+    }
+  })
 }
 
 /**

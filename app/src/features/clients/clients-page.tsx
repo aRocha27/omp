@@ -1,6 +1,6 @@
 import { useState, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, CircleAlert, Search, X } from 'lucide-react'
+import { Users, CircleAlert, Search, X, Plus } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -29,7 +29,16 @@ export function ClientsPage() {
 
   return (
     <div>
-      <PageHeader title="Clients" description="Client directory." />
+      <PageHeader
+        title="Clients"
+        description="Client directory."
+        actions={
+          <Button size="sm" onClick={() => navigate('/clients/new')}>
+            <Plus className="size-4" />
+            New client
+          </Button>
+        }
+      />
 
       <ClientsFilters value={filters} onChange={setFilters} />
 
@@ -91,7 +100,7 @@ function ClientsFilters({ value, onChange }: ClientsFiltersProps) {
           <Input
             id={searchId}
             className="w-72 pl-8"
-            placeholder="Search by name, tax no., or PHC no."
+            placeholder="Search by name, tax no., or SAP no."
             value={value.search}
             onChange={(e) => set('search', e.target.value)}
           />

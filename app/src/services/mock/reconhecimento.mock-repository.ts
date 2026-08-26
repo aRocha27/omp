@@ -47,10 +47,10 @@ export class MockReconhecimentoRepository implements ReconhecimentoRepository {
 
   async add(entry: NewReconhecimento, role: Role): Promise<Reconhecimento> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para alterar reconhecimentos.')
+    assertMockMutationRole(role, 'No permission to change recognitions.')
     const order = this.store.orders.find((row) => row.ID_Order === entry.ID_Order)
     if (!order) {
-      throw new RepositoryError('not-found', 'Pedido não encontrado.')
+      throw new RepositoryError('not-found', 'Order not found.')
     }
     assertRecognitionCapacity(
       order,
@@ -70,18 +70,18 @@ export class MockReconhecimentoRepository implements ReconhecimentoRepository {
 
   async update(id: number, patch: ReconhecimentoPatch, role: Role): Promise<Reconhecimento> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para alterar reconhecimentos.')
+    assertMockMutationRole(role, 'No permission to change recognitions.')
     const current = this.rows.find((row) => row.ID_Reconhecimento === id)
     if (!current) {
-      throw new RepositoryError('not-found', 'Reconhecimento não encontrado.')
+      throw new RepositoryError('not-found', 'Recognition not found.')
     }
     const order = this.store.orders.find((row) => row.ID_Order === current.ID_Order)
     if (!order) {
-      throw new RepositoryError('not-found', 'Pedido não encontrado.')
+      throw new RepositoryError('not-found', 'Order not found.')
     }
     const candidate = { ...current, ...patch }
     if (candidate.ID_Tp_Reconhecimento === null || candidate.Valor_Reconhecimento === null) {
-      throw new RepositoryError('server-error', 'Tipo e valor do reconhecimento são obrigatórios.')
+      throw new RepositoryError('server-error', 'Recognition type and value are required.')
     }
     assertRecognitionCapacity(
       order,
@@ -98,10 +98,10 @@ export class MockReconhecimentoRepository implements ReconhecimentoRepository {
 
   async remove(id: number, role: Role): Promise<void> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para alterar reconhecimentos.')
+    assertMockMutationRole(role, 'No permission to change recognitions.')
     const index = this.rows.findIndex((row) => row.ID_Reconhecimento === id)
     if (index === -1) {
-      throw new RepositoryError('not-found', 'Reconhecimento não encontrado.')
+      throw new RepositoryError('not-found', 'Recognition not found.')
     }
     // Hard delete — dbo.Reconhecimento has no deleted_at column (DB cannot change).
     this.rows.splice(index, 1)
@@ -113,16 +113,21 @@ export class MockReconhecimentoRepository implements ReconhecimentoRepository {
     role: Role,
   ): Promise<Reconhecimento[]> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para alterar reconhecimentos.')
+    assertMockMutationRole(role, 'No permission to change recognitions.')
     const order = this.store.orders.find((row) => row.ID_Order === orderId)
     if (!order) {
-      throw new RepositoryError('not-found', 'Pedido não encontrado.')
+      throw new RepositoryError('not-found', 'Order not found.')
     }
 
     const lines =
       input.kind === 'warranty'
         ? planWarrantyPropagation(order)
-        : planMaintenancePropagation(order, input.startDate, input.years)
+        : planMaintenancePropagation(
+            order,
+            input.startDate,
+            input.years,
+            input.recognitionDate,
+          )
     const existing = this.rows.filter((row) => row.ID_Order === orderId)
     const plannedTotal = lines.reduce((sum, line) => sum + line.value, 0)
     if (lines.length > 0) {

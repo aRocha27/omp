@@ -1,12 +1,23 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Search, X, ChevronDown } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
+import { DatePicker } from '@/components/ui/date-picker'
 import { cn } from '@/components/ui/cn'
 import type { OrderSearchFilters } from '@/domain/models/order'
-import { areas, instrumentos, orderTypes, produtos, tipos } from '@/fixtures/reference-data'
-import type { ReferenceOption } from '@/fixtures/reference-data'
+import {
+  areas,
+  instrumentos,
+  orderTypes,
+  produtos,
+  tipos,
+  type InstrumentoOption,
+  type ProdutoOption,
+  type ReferenceOption,
+} from '@/fixtures/reference-data'
+import { useProdutos } from '@/features/orders/api/use-produtos'
+import { useInstrumentos } from '@/features/orders/api/use-instrumentos'
 
 export interface OrdersFiltersValue {
   clientName: string
@@ -35,6 +46,28 @@ interface OrdersFiltersProps {
   onChange: (next: OrdersFiltersValue) => void
 }
 
+/** Merge a parent-filtered option list with the currently-held child value.
+ *
+ * The cascade dropdowns show only the parent's children, but a held id that no longer
+ * matches its parent (data drift) must stay visible so the user can keep or remove it
+ * without losing the row from the table. The held id is prepended from the full
+ * fixture list when it isn't already in the filtered set; new picks stay constrained
+ * to the filtered children. This is the same contract the create/detail forms use. */
+function mergeSaved<T extends ReferenceOption>(
+  filtered: readonly T[] | undefined,
+  heldIds: readonly (string | number)[],
+  full: readonly T[],
+): T[] {
+  const list: T[] = filtered ? [...filtered] : []
+  for (const heldId of heldIds) {
+    if (heldId == null || heldId === '') continue
+    if (list.some((o) => String(o.id) === String(heldId))) continue
+    const held = full.find((o) => String(o.id) === String(heldId))
+    if (held) list.unshift(held)
+  }
+  return list
+}
+
 /** Cleared filter state for the in-bar Clear button (not exported — see orders-page for
  * the page-level initial state). */
 const emptyFilters: OrdersFiltersValue = {
@@ -57,7 +90,7 @@ const emptyFilters: OrdersFiltersValue = {
  * Each checkbox filter (order type / area / tipo / product / instrument + the two "only
  * show…" booleans) is a button that opens a dropdown panel of checkbox(es) — multi-select
  * for the categoricals, a single toggle for the booleans. The button shows a count badge
- * and highlights when the filter is active. Client / PHC ref stay contains-match text
+ * and highlights when the filter is active. Client / SAP ref stay contains-match text
  * inputs and the date range stays a pair of date inputs. `toSearchFilters` maps this state
  * into the nullable `OrderSearchFilters` the repository expects (arrays, with empty → null).
  *
@@ -75,6 +108,40 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
     const current = value[key]
     set(key, current.includes(id) ? current.filter((c) => c !== id) : [...current, id])
   }
+
+  // Cascade: Area → Product → Instrument (mirrors the create-order form).
+  // The list filter still accepts multiple selected areas / products, but the cascade
+  // can only narrow by a single parent. We pick the first selected area as the Product
+  // parent and the first selected product as the Instrument parent — the rest of the
+  // selected ids still filter the table; the dropdown just shows one branch. This is
+  // the same contract the create form uses: a single Área/Produto cascades to children,
+  // and the held child id is merged back in (mergeSaved) so it stays visible/selectable
+  // even when the parent narrows the list.
+  const cascadeArea = value.idArea[0]
+  const cascadeProduto = value.idProduto[0]
+
+  const produtosQuery = useProdutos({ area: cascadeArea, enabled: cascadeArea != null })
+  const instrumentosQuery = useInstrumentos({
+    produto: cascadeProduto,
+    enabled: cascadeProduto != null,
+  })
+
+  const produtoOptions = useMemo<ProdutoOption[]>(() => {
+    // No area selected → the Product dropdown is unconstrained, so it always
+    // shows the full fixture. Once an area is selected, the cascade narrows
+    // to that area's products; while the live query is still in flight we
+    // show nothing rather than the full list (which would be misleading).
+    const list = cascadeArea
+      ? (produtosQuery.data ?? [])
+      : (produtos as ProdutoOption[])
+    return mergeSaved(list, value.idProduto, produtos as ProdutoOption[])
+  }, [cascadeArea, produtosQuery.data, value.idProduto])
+  const instrumentoOptions = useMemo<InstrumentoOption[]>(() => {
+    const list = cascadeProduto
+      ? (instrumentosQuery.data ?? [])
+      : (instrumentos as InstrumentoOption[])
+    return mergeSaved(list, value.idInstrumento, instrumentos as InstrumentoOption[])
+  }, [cascadeProduto, instrumentosQuery.data, value.idInstrumento])
 
   return (
     <div className="mb-4 space-y-3">
@@ -94,11 +161,11 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
           )}
         </LabeledField>
 
-        <LabeledField label="PHC ref">
+        <LabeledField label="SAP Order">
           {(id) => (
             <Input
               id={id}
-              placeholder="Search PHC ref"
+              placeholder="Search SAP Order"
               value={value.encomendaCliPHC}
               onChange={(e) => set('encomendaCliPHC', e.target.value)}
             />
@@ -107,22 +174,22 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
 
         <LabeledField label="From date">
           {(id) => (
-            <Input
+            <DatePicker
               id={id}
-              type="date"
-              value={value.dateFrom}
-              onChange={(e) => set('dateFrom', e.target.value)}
+              aria-label="From date"
+              value={value.dateFrom || null}
+              onChange={(next) => set('dateFrom', next ?? '')}
             />
           )}
         </LabeledField>
 
         <LabeledField label="To date">
           {(id) => (
-            <Input
+            <DatePicker
               id={id}
-              type="date"
-              value={value.dateTo}
-              onChange={(e) => set('dateTo', e.target.value)}
+              aria-label="To date"
+              value={value.dateTo || null}
+              onChange={(next) => set('dateTo', next ?? '')}
             />
           )}
         </LabeledField>
@@ -143,23 +210,29 @@ export function OrdersFilters({ value, onChange }: OrdersFiltersProps) {
             onToggle={(code) => toggleString('idArea', String(code))}
           />
         </FilterDropdownButton>
-        <FilterDropdownButton label="Tipo" selectedCount={value.idTipo.length}>
+        <FilterDropdownButton label="Type" selectedCount={value.idTipo.length}>
           <CheckboxList
             options={tipos}
             selected={value.idTipo}
             onToggle={(code) => toggleString('idTipo', String(code))}
           />
         </FilterDropdownButton>
-        <FilterDropdownButton label="Product" selectedCount={value.idProduto.length}>
+        <FilterDropdownButton
+          label={cascadeArea ? `Product (in ${cascadeArea})` : 'Product'}
+          selectedCount={value.idProduto.length}
+        >
           <CheckboxList
-            options={produtos}
+            options={produtoOptions}
             selected={value.idProduto}
             onToggle={(id) => toggleNumber('idProduto', Number(id))}
           />
         </FilterDropdownButton>
-        <FilterDropdownButton label="Instrument" selectedCount={value.idInstrumento.length}>
+        <FilterDropdownButton
+          label={cascadeProduto ? `Instrument (in product ${cascadeProduto})` : 'Instrument'}
+          selectedCount={value.idInstrumento.length}
+        >
           <CheckboxList
-            options={instrumentos}
+            options={instrumentoOptions}
             selected={value.idInstrumento}
             onToggle={(id) => toggleNumber('idInstrumento', Number(id))}
             scrollable

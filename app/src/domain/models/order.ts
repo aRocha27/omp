@@ -27,7 +27,7 @@ export interface Order {
   /**
    * Provisional flag. The base dbo.[Order] table has no such column; this is the
    * `Provisoria` bit exposed by dbo.V_Order_List (true for every non-Client order
-   * type — S/W/COM/CANC/WPO/...). A provisória order is always editable, regardless
+   * type — S/W/COM/CANC/WPO/...). A provisional order is always editable, regardless
    * of the month-close lock (see domain/orders/order-policy).
    */
   Provisoria: boolean | null
@@ -50,7 +50,7 @@ export interface Order {
    * `dbo.Tipo.Warranty` (bit) via `Order.ID_Tipo = Tipo.ID_Tipo`. `true` for
    * INSTR/ACESS/WARR, `false` for CM/CONS/SERVI/SPARE/TR/SOFT; `null` when the
    * join found no `Tipo` row (or the live read has not resolved it). Drives the
-   * visibility of the warranty caracterização fields and the propagate-guarantia
+   * visibility of the warranty caracterização fields and the propagate-warranty
    * button (see domain/rules/recognition).
    */
   Tipo_Warranty: boolean | null
@@ -103,6 +103,17 @@ export interface OrderSummary {
   Sell_Price: number | null
   Negocio_Fechado: boolean | null
   Encomenda_Cli_PHC: string | null
+  /**
+   * Order-table-only columns joined from dbo.[Order] so the list grid can render the
+   * full 19-column table without a per-row detail fetch. Types mirror `Order`.
+   */
+  Kit: boolean | null
+  ID_Tp_Warranty: number | null
+  Warranty_Reserve: number | null
+  Warranty_DT_Inicio: string | null
+  Orc_Proposta: string | null
+  PO_Cliente: string | null
+  ID_Tp_Revenue: number | null
 }
 
 /**

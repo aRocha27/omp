@@ -18,9 +18,13 @@ export function formatPrice(value: number | null | undefined): string {
   return priceFormatter.format(value)
 }
 
-const dateFormatter = new Intl.DateTimeFormat('en-IE', {
-  dateStyle: 'medium',
-  timeZone: 'UTC', // DB stores UTC; display the UTC date as-is (TIMEZONE.md)
+// dd/mm/yyyy — the business locale for all order date displays. DB stores UTC; the
+// UTC date is shown as-is (TIMEZONE.md). pt-PT formats day-first with 2-digit day/month.
+const dateFormatter = new Intl.DateTimeFormat('pt-PT', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'UTC',
 })
 
 /** Formats an order date (ISO string / Date) for a list cell. */

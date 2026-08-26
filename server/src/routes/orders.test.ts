@@ -2,12 +2,13 @@ import request from 'supertest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ConnectionPool } from 'mssql'
 import { createApp, type AppDependencies } from '../app.js'
-import { RecognitionCapacityError } from '../db.js'
+import { RecognitionCapacityError, ClientNotFoundError } from '../db.js'
 import { OrdersProfileNotConfiguredError } from '../profiles.js'
 import type {
   ConnectionConfig,
   DocumentoFaturacaoRow,
   DocumentoFaturacaoTypeRow,
+  KitConsumableRow,
   OrderDetailRow,
   OrderSummaryRow,
   ReconhecimentoRow,
@@ -35,25 +36,25 @@ const summaryRow: OrderSummaryRow = {
   Sell_Price: 12500,
   Negocio_Fechado: true,
   Encomenda_Cli_PHC: 'PHC-001',
+  Kit: false,
+  ID_Tp_Warranty: 2,
+  Warranty_Reserve: 500,
+  Warranty_DT_Inicio: '2026-01-01T00:00:00Z',
+  Orc_Proposta: 'PROP-12000',
+  PO_Cliente: 'PO-1',
+  ID_Tp_Revenue: 1,
   Provisoria: false,
 }
 
 const detailRow: OrderDetailRow = {
   ...summaryRow,
   Tipo_Warranty: true,
-  Orc_Proposta: 'PROP-12000',
-  PO_Cliente: 'PO-1',
-  ID_Tp_Warranty: 2,
-  Warranty_Reserve: 500,
-  Warranty_DT_Inicio: '2026-01-01T00:00:00Z',
-  ID_Tp_Revenue: 1,
   Facturado: false,
   Reconhecido: false,
   Cod_Enc_Fornecedor: 'SUP-1',
   Obs: 'Approved',
   ID_User: 'arocha',
   DT_User: '2026-08-23T00:00:00Z',
-  Kit: false,
   Kit_Amount: null,
   Contacto: 'João',
 }
@@ -105,6 +106,20 @@ const facturacaoRows: DocumentoFaturacaoRow[] = [
   },
 ]
 
+const kitConsumableRows: KitConsumableRow[] = [
+  {
+    ID_Kit: 1,
+    ID_Order: 101,
+    Date: '2026-08-23T00:00:00Z',
+    Internal_Order: 'INT-1',
+    Material: 'MAT-A',
+    Description: 'Filter cartridge',
+    Quant: 2,
+    Unit_Price: 125,
+    Total_Price: 250,
+  },
+]
+
 function ordersDependencies(overrides: Partial<AppDependencies> = {}) {
   const close = vi.fn().mockResolvedValue(undefined)
   const pool = { close } as unknown as ConnectionPool
@@ -122,6 +137,19 @@ function ordersDependencies(overrides: Partial<AppDependencies> = {}) {
     resolveOrdersProfile: vi.fn(() => credentials),
     fetchOrderSummaries: vi.fn(async () => [summaryRow]),
     fetchOrderById: vi.fn(async () => detailRow),
+    fetchDashboardSnapshot: vi.fn(async () => ({
+      year: 2026,
+      kpis: {
+        ordersBookedYtd: 0,
+        nobYtd: 0,
+        revenueRecognizedYtd: 0,
+        backlogToRecognize: 0,
+        backlogAtPeriodStart: 0,
+      },
+      monthlyTrend: [],
+      recognitionQueue: [],
+      recentOrders: [],
+    })),
     updateOrder: vi.fn(async () => detailRow),
     createOrder: vi.fn(async () => detailRow),
     fetchReconhecimentos: vi.fn(async () => []),
@@ -134,6 +162,10 @@ function ordersDependencies(overrides: Partial<AppDependencies> = {}) {
     addFacturacao: vi.fn(async () => facturacaoRows[0]),
     updateFacturacao: vi.fn(async () => facturacaoRows[0]),
     deleteFacturacao: vi.fn(async () => true),
+    fetchKitConsumables: vi.fn(async () => []),
+    addKitConsumable: vi.fn(async () => kitConsumableRows[0]),
+    updateKitConsumable: vi.fn(async () => kitConsumableRows[0]),
+    deleteKitConsumable: vi.fn(async () => true),
     fetchClientSummaries: vi.fn(async () => []),
     fetchClientById: vi.fn(async () => null),
     close,
@@ -382,6 +414,22 @@ describe('Orders update endpoint', () => {
     expect(deps.updateOrder).toHaveBeenCalled()
   })
 
+  it('allows an editor to toggle Order_Factory on a histórico order (not a locked field)', async () => {
+    const deps = ordersDependencies({
+      fetchOrderById: vi.fn(async () => historicoDetailRow),
+    })
+    const response = await ordersApi(deps, null)
+      .post('/api/orders/update')
+      .set('x-user-role', 'editor')
+      .send({ id: 202, patch: { Order_Factory: true } })
+
+    expect(response.status).toBe(200)
+    expect(deps.updateOrder).toHaveBeenCalledWith(expect.anything(), 202, {
+      Order_Factory: true,
+      user: 'editor',
+    })
+  })
+
   it('allows an editor to update a non-locked field on a histórico order', async () => {
     const deps = ordersDependencies({
       fetchOrderById: vi.fn(async () => historicoDetailRow),
@@ -476,6 +524,71 @@ describe('Orders update endpoint', () => {
     expect(response.body.order.Provisoria).toBe(false)
     expect(typeof response.body.order.Orc_Proposta).toBe('string')
     expect(response.body.order.Orc_Proposta).toBe('PROP-12000')
+  })
+})
+
+describe('Orders create endpoint', () => {
+  const validCreateBody = {
+    DT_Order: '2026-08-25',
+    ID_Tp_Order: 'C',
+    ID_Client: 93,
+    ID_Area: 'BDAL',
+    ID_Tipo: 'INSTR',
+    ID_Produto: 2,
+    ID_Tp_Revenue: 1,
+  }
+
+  it('creates an order as editor and forwards the body to createOrder', async () => {
+    const deps = ordersDependencies()
+    const response = await ordersApi(deps, null)
+      .post('/api/orders')
+      .set('x-user-role', 'user')
+      .send(validCreateBody)
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual({ ok: true, order: detailRow })
+    expect(deps.createOrder).toHaveBeenCalledWith(expect.anything(), validCreateBody, 'editor')
+  })
+
+  it('rejects a create without ID_Tp_Revenue as validation (revenue type is required)', async () => {
+    const deps = ordersDependencies()
+    const { ID_Tp_Revenue, ...withoutRevenue } = validCreateBody
+    void ID_Tp_Revenue
+    const response = await ordersApi(deps, null)
+      .post('/api/orders')
+      .set('x-user-role', 'user')
+      .send(withoutRevenue)
+
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({ ok: false, code: 'validation' })
+    expect(deps.createOrder).not.toHaveBeenCalled()
+  })
+
+  it('maps a ClientNotFoundError from the db layer to a 400 validation response', async () => {
+    const deps = ordersDependencies({
+      createOrder: vi.fn(async () => {
+        throw new ClientNotFoundError(999)
+      }),
+    })
+    const response = await ordersApi(deps, null)
+      .post('/api/orders')
+      .set('x-user-role', 'user')
+      .send({ ...validCreateBody, ID_Client: 999 })
+
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({ ok: false, code: 'validation' })
+    expect(response.body.message).toContain('999')
+  })
+
+  it('rejects a viewer with 403 forbidden', async () => {
+    const deps = ordersDependencies()
+    const response = await ordersApi(deps, null)
+      .post('/api/orders')
+      .set('x-user-role', 'viewer')
+      .send(validCreateBody)
+
+    expect(response.status).toBe(403)
+    expect(deps.createOrder).not.toHaveBeenCalled()
   })
 })
 
@@ -626,6 +739,7 @@ describe('Orders sub-table mutations', () => {
         kind: 'maintenance',
         startDate: '2027-02-18',
         years: 2,
+        recognitionDate: '2027-06-21',
       })
 
     expect(response.status).toBe(201)
@@ -637,9 +751,28 @@ describe('Orders sub-table mutations', () => {
         kind: 'maintenance',
         startDate: '2027-02-18',
         years: 2,
+        recognitionDate: '2027-06-21',
       },
       'editor',
     )
+  })
+
+  it('rejects maintenance propagation without a recognition date', async () => {
+    const deps = ordersDependencies()
+    const response = await ordersApi(deps, null)
+      .post('/api/orders/reconhecimentos/propagate')
+      .set('x-user-role', 'editor')
+      .send({
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 2,
+      })
+
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({ ok: false, code: 'validation' })
+    expect(deps.propagateReconhecimento).not.toHaveBeenCalled()
+    expect(deps.openPool).not.toHaveBeenCalled()
   })
 
   it('rejects viewers for every recognition mutation before opening a pool', async () => {
@@ -719,5 +852,145 @@ describe('Orders sub-table mutations', () => {
     expect([updated.status, deleted.status]).toEqual([403, 403])
     expect(deps.updateFacturacao).not.toHaveBeenCalled()
     expect(deps.deleteFacturacao).not.toHaveBeenCalled()
+  })
+})
+
+describe('Kit_Consumables sub-table', () => {
+  it('returns kit consumable rows for a known orderId', async () => {
+    const deps = ordersDependencies({
+      fetchKitConsumables: vi.fn(async () => kitConsumableRows),
+    })
+    const response = await ordersApi(deps).get('/api/orders/kit-consumables?orderId=101')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: true, rows: kitConsumableRows })
+    expect(deps.fetchKitConsumables).toHaveBeenCalledWith(expect.anything(), 101)
+    expect(deps.close).toHaveBeenCalledOnce()
+  })
+
+  it('returns an empty kit consumable array for an unknown orderId', async () => {
+    const deps = ordersDependencies({
+      fetchKitConsumables: vi.fn(async () => []),
+    })
+    const response = await ordersApi(deps).get('/api/orders/kit-consumables?orderId=9999999')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: true, rows: [] })
+  })
+
+  it('rejects a missing orderId query parameter', async () => {
+    const deps = ordersDependencies()
+    const response = await ordersApi(deps).get('/api/orders/kit-consumables')
+
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({ ok: false, code: 'validation' })
+    expect(deps.openPool).not.toHaveBeenCalled()
+  })
+
+  it('adds a kit consumable row', async () => {
+    const deps = ordersDependencies()
+    const body = {
+      ID_Order: 101,
+      Date: '2026-08-23T00:00:00Z',
+      Internal_Order: 'INT-2',
+      Material: 'MAT-B',
+      Description: 'Column',
+      Quant: 1,
+      Unit_Price: 100,
+      Total_Price: 100,
+    }
+    const response = await ordersApi(deps, null)
+      .post('/api/orders/kit-consumables')
+      .set('x-user-role', 'editor')
+      .send(body)
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual({ ok: true, row: kitConsumableRows[0] })
+    expect(deps.addKitConsumable).toHaveBeenCalledWith(expect.anything(), body)
+  })
+
+  it('updates a kit consumable row', async () => {
+    const deps = ordersDependencies()
+    const patch = { Quant: 3, Unit_Price: 125, Total_Price: 375 }
+    const response = await ordersApi(deps)
+      .post('/api/orders/kit-consumables/update')
+      .send({ id: 1, patch })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ok: true, row: kitConsumableRows[0] })
+    expect(deps.updateKitConsumable).toHaveBeenCalledWith(expect.anything(), 1, patch)
+  })
+
+  it('returns 404 when updating a missing kit consumable', async () => {
+    const deps = ordersDependencies({
+      updateKitConsumable: vi.fn(async () => null),
+    })
+    const response = await ordersApi(deps)
+      .post('/api/orders/kit-consumables/update')
+      .send({ id: 999, patch: { Quant: 1 } })
+
+    expect(response.status).toBe(404)
+    expect(response.body).toMatchObject({ ok: false, code: 'not-found' })
+  })
+
+  it('hard-deletes a kit consumable row and returns 404 when it does not exist', async () => {
+    const found = ordersDependencies()
+    const deleted = await ordersApi(found)
+      .post('/api/orders/kit-consumables/delete')
+      .send({ id: 1 })
+
+    expect(deleted.status).toBe(200)
+    expect(deleted.body).toEqual({ ok: true })
+    expect(found.deleteKitConsumable).toHaveBeenCalledWith(expect.anything(), 1)
+
+    const missing = ordersDependencies({ deleteKitConsumable: vi.fn(async () => false) })
+    const notFound = await ordersApi(missing)
+      .post('/api/orders/kit-consumables/delete')
+      .send({ id: 999 })
+    expect(notFound.status).toBe(404)
+    expect(notFound.body).toMatchObject({ ok: false, code: 'not-found' })
+  })
+
+  it('rejects viewers for kit consumable mutations before opening a pool', async () => {
+    const deps = ordersDependencies()
+    const add = await ordersApi(deps, null)
+      .post('/api/orders/kit-consumables')
+      .set('x-user-role', 'viewer')
+      .send({
+        ID_Order: 101,
+        Date: '2026-08-23T00:00:00Z',
+        Internal_Order: 'INT',
+        Material: 'M',
+        Description: 'D',
+        Quant: 1,
+        Unit_Price: 1,
+        Total_Price: 1,
+      })
+    const update = await ordersApi(deps, null)
+      .post('/api/orders/kit-consumables/update')
+      .set('x-user-role', 'viewer')
+      .send({ id: 1, patch: { Quant: 1 } })
+    const remove = await ordersApi(deps, null)
+      .post('/api/orders/kit-consumables/delete')
+      .set('x-user-role', 'viewer')
+      .send({ id: 1 })
+
+    expect([add.status, update.status, remove.status]).toEqual([403, 403, 403])
+    expect(deps.addKitConsumable).not.toHaveBeenCalled()
+    expect(deps.updateKitConsumable).not.toHaveBeenCalled()
+    expect(deps.deleteKitConsumable).not.toHaveBeenCalled()
+    expect(deps.openPool).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid kit consumable create body', async () => {
+    const deps = ordersDependencies()
+    const response = await ordersApi(deps, null)
+      .post('/api/orders/kit-consumables')
+      .set('x-user-role', 'editor')
+      .send({ ID_Order: 101, Date: '2026-08-23T00:00:00Z' })
+
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({ ok: false, code: 'validation' })
+    expect(deps.addKitConsumable).not.toHaveBeenCalled()
   })
 })

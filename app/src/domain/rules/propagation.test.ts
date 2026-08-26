@@ -83,8 +83,8 @@ describe('planWarrantyPropagation', () => {
 describe('planMaintenancePropagation', () => {
   const cm: MaintenancePropagationOrder = { ID_Tipo: 'CM', Sell_Price: 12000 }
 
-  it('generates years × 12 CM lines from the contract start', () => {
-    const lines = planMaintenancePropagation(cm, '2025-01-15', 1)
+  it('generates years × 12 CM lines from the contract start when no catch-up is needed', () => {
+    const lines = planMaintenancePropagation(cm, '2025-01-15', 1, '2025-01-15')
     expect(lines).toHaveLength(12)
     expect(lines.every((l) => l.type === 'CM')).toBe(true)
     // Start normalized to first of month → 2025-01-01.
@@ -92,9 +92,29 @@ describe('planMaintenancePropagation', () => {
     expect(lines[11].date).toContain('2025-12-01')
   })
 
+  it('moves elapsed installments to the recognition month and keeps future dates', () => {
+    const lines = planMaintenancePropagation(cm, '2026-01-15', 1, '2026-06-25')
+
+    expect(lines).toHaveLength(12)
+    // Jan–Jun installments are all recognized in June. The June scheduled line
+    // already lands in that month, so the first six rows share 1 June.
+    expect(lines.slice(0, 6).map((line) => line.date)).toEqual(
+      Array.from({ length: 6 }, () => '2026-06-01T00:00:00.000Z'),
+    )
+    expect(lines.slice(6).map((line) => line.date)).toEqual([
+      '2026-07-01T00:00:00.000Z',
+      '2026-08-01T00:00:00.000Z',
+      '2026-09-01T00:00:00.000Z',
+      '2026-10-01T00:00:00.000Z',
+      '2026-11-01T00:00:00.000Z',
+      '2026-12-01T00:00:00.000Z',
+    ])
+    expect(lines.reduce((sum, line) => sum + line.value, 0)).toBe(12000)
+  })
+
   it('divides Sell_Price evenly across years × 12 months', () => {
     // 12000 / (2 × 12) = 500.
-    const lines = planMaintenancePropagation(cm, '2025-01-01', 2)
+    const lines = planMaintenancePropagation(cm, '2025-01-01', 2, '2025-01-01')
     expect(lines).toHaveLength(24)
     expect(lines[0].value).toBe(500)
   })
@@ -104,6 +124,7 @@ describe('planMaintenancePropagation', () => {
       { ID_Tipo: 'CM', Sell_Price: 100.0001 },
       '2025-01-01',
       1,
+      '2025-01-01',
     )
     expect(lines.reduce((sum, line) => sum + line.value, 0)).toBeCloseTo(100.0001, 4)
     expect(new Set(lines.map((line) => line.value))).toEqual(new Set([8.3334, 8.3333]))
@@ -111,27 +132,54 @@ describe('planMaintenancePropagation', () => {
 
   it('returns no lines for a non-CM order kind', () => {
     expect(
-      planMaintenancePropagation({ ID_Tipo: 'INSTR', Sell_Price: 12000 }, '2025-01-01', 1),
+      planMaintenancePropagation(
+        { ID_Tipo: 'INSTR', Sell_Price: 12000 },
+        '2025-01-01',
+        1,
+        '2025-06-01',
+      ),
     ).toEqual([])
   })
 
   it('returns no lines when Sell_Price is missing or non-positive', () => {
     expect(
-      planMaintenancePropagation({ ID_Tipo: 'CM', Sell_Price: null }, '2025-01-01', 1),
+      planMaintenancePropagation(
+        { ID_Tipo: 'CM', Sell_Price: null },
+        '2025-01-01',
+        1,
+        '2025-06-01',
+      ),
     ).toEqual([])
-    expect(planMaintenancePropagation({ ID_Tipo: 'CM', Sell_Price: 0 }, '2025-01-01', 1)).toEqual(
-      [],
+    expect(
+      planMaintenancePropagation(
+        { ID_Tipo: 'CM', Sell_Price: 0 },
+        '2025-01-01',
+        1,
+        '2025-06-01',
+      ),
+    ).toEqual([])
+  })
+
+  it('throws when startDate, years, or recognitionDate is missing', () => {
+    expect(() => planMaintenancePropagation(cm, undefined, 1, '2025-01-01')).toThrow()
+    expect(() =>
+      planMaintenancePropagation(cm, '2025-01-01', undefined, '2025-01-01'),
+    ).toThrow()
+    expect(() => planMaintenancePropagation(cm, '2025-01-01', 1, undefined)).toThrow()
+  })
+
+  it('throws when a maintenance date is invalid', () => {
+    expect(() => planMaintenancePropagation(cm, 'not-a-date', 1, '2025-01-01')).toThrow(
+      'Contract start date is invalid.',
+    )
+    expect(() => planMaintenancePropagation(cm, '2025-01-01', 1, 'not-a-date')).toThrow(
+      'Recognition date is invalid.',
     )
   })
 
-  it('throws when startDate or years is missing', () => {
-    expect(() => planMaintenancePropagation(cm, undefined, 1)).toThrow()
-    expect(() => planMaintenancePropagation(cm, '2025-01-01', undefined)).toThrow()
-  })
-
   it('throws when years is outside the integer 1–100 range', () => {
-    expect(() => planMaintenancePropagation(cm, '2025-01-01', 0)).toThrow()
-    expect(() => planMaintenancePropagation(cm, '2025-01-01', 1.5)).toThrow()
-    expect(() => planMaintenancePropagation(cm, '2025-01-01', 101)).toThrow()
+    expect(() => planMaintenancePropagation(cm, '2025-01-01', 0, '2025-01-01')).toThrow()
+    expect(() => planMaintenancePropagation(cm, '2025-01-01', 1.5, '2025-01-01')).toThrow()
+    expect(() => planMaintenancePropagation(cm, '2025-01-01', 101, '2025-01-01')).toThrow()
   })
 })

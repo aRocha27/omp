@@ -115,6 +115,24 @@ export const ordersListBodySchema = z.object({
 
 export type OrdersListBody = z.infer<typeof ordersListBodySchema>
 
+// Recognition report filters. The list endpoint accepts any subset; an empty
+// `filters` object returns every row the view produces (subject to the `limit`).
+const recognitionReportFiltersSchema = z.object({
+  yearRecognition: z.array(z.number().int()).optional(),
+  area: z.array(z.string().trim().min(1)).optional(),
+  grpReport: z.array(z.string().trim().min(1)).optional(),
+  tipo: z.array(z.string().trim().min(1)).optional(),
+  produto: z.array(z.string().trim().min(1)).optional(),
+  encomendaCliPHC: z.array(z.string().trim().min(1)).optional(),
+})
+
+export const recognitionReportListBodySchema = z.object({
+  filters: recognitionReportFiltersSchema.optional().default({}),
+  limit: z.number().int().min(1).max(2000).default(1000),
+})
+
+export type RecognitionReportListBody = z.infer<typeof recognitionReportListBodySchema>
+
 // Orders detail endpoint takes the order id as a query parameter (?id=N). It must be a
 // positive integer. Returns `undefined` when the param is absent so the router can 400
 // (the contract has no "list all" detail) and `null` when present but invalid.
@@ -134,6 +152,7 @@ export type OrderIdParam = z.infer<typeof orderIdParamSchema>
 // request context/role and is never accepted from the body.
 const orderUpdatePatchSchema = z.object({
   DT_Order: orderDateSchema.nullable().optional(),
+  Order_Factory: z.boolean().nullable().optional(),
   ID_Tp_Order: z.string().nullable().optional(),
   Encomenda_Cli_PHC: z.string().nullable().optional(),
   ID_Client: z.number().int().nullable().optional(),
@@ -165,6 +184,9 @@ export const orderCreateBodySchema = orderUpdatePatchSchema
     ID_Area: z.string().trim().min(1),
     ID_Tipo: z.string().trim().min(1),
     ID_Produto: z.number().int().positive(),
+    // Revenue type is mandatory on creation — every order must classify its revenue
+    // recognition up front (the detail page locks it once set).
+    ID_Tp_Revenue: z.number().int().positive(),
   })
   .omit({ Facturado: true, Reconhecido: true, Negocio_Fechado: true })
 
@@ -215,6 +237,7 @@ export const reconhecimentoPropagateBodySchema = z.discriminatedUnion('kind', [
     kind: z.literal('maintenance'),
     startDate: orderDateSchema,
     years: z.number().int().min(1).max(100),
+    recognitionDate: orderDateSchema,
   }),
 ])
 
@@ -231,6 +254,38 @@ export const facturacaoUpdateBodySchema = z.object({
 })
 
 export const facturacaoDeleteBodySchema = positiveIdBodySchema
+
+// Kit_Consumables sub-table. The client sends Total_Price (typically Quant * Unit_Price);
+// the server accepts it but validates non-negativity. Quant is a positive integer, the
+// money fields are finite and non-negative. Mirrors the Reconhecimento/Facturacao create
+// schemas (ID_Order positive, date valid, strings non-empty).
+export const kitConsumableCreateBodySchema = z.object({
+  ID_Order: z.number().int().positive(),
+  Date: orderDateSchema,
+  Internal_Order: z.string().trim().min(1),
+  Material: z.string().trim().min(1),
+  Description: z.string().trim().min(1),
+  Quant: z.number().int().positive(),
+  Unit_Price: z.number().finite().nonnegative(),
+  Total_Price: z.number().finite().nonnegative(),
+})
+
+const kitConsumablePatchSchema = z.object({
+  Date: orderDateSchema.optional(),
+  Internal_Order: z.string().trim().min(1).optional(),
+  Material: z.string().trim().min(1).optional(),
+  Description: z.string().trim().min(1).optional(),
+  Quant: z.number().int().positive().optional(),
+  Unit_Price: z.number().finite().nonnegative().optional(),
+  Total_Price: z.number().finite().nonnegative().optional(),
+})
+
+export const kitConsumableUpdateBodySchema = z.object({
+  id: z.number().int().positive(),
+  patch: kitConsumablePatchSchema.default({}),
+})
+
+export const kitConsumableDeleteBodySchema = positiveIdBodySchema
 
 export const utilizadorCreateBodySchema = z.object({
   ID_User: z.string().trim().min(1).max(50),
@@ -253,6 +308,50 @@ export const clientsListBodySchema = z.object({
 
 export type ClientsListBody = z.infer<typeof clientsListBodySchema>
 
+// Clients create endpoint. Seven fields are required (Name, Address, Location,
+// Postal Code, SAP number, Tax Number, Type); everything else is optional and
+// nullable so a partial record can be fleshed out via the edit flow later. The
+// acting identity is taken from the server-side role header, never from the body.
+const clientOptionalString = z.string().trim().min(1).nullable().optional()
+export const clientCreateBodySchema = z.object({
+  nome: z.string().trim().min(1, 'name is required'),
+  morada: z.string().trim().min(1, 'address is required'),
+  local: z.string().trim().min(1, 'location is required'),
+  codpost: z.string().trim().min(1, 'postal_code is required'),
+  no_PHC: z.number().int().nonnegative(),
+  ncont: z.string().trim().min(1, 'tax_number is required'),
+  ID_Tp_Cliente: z.number().int().positive(),
+  telefone: clientOptionalString,
+  contacto: clientOptionalString,
+  fax: clientOptionalString,
+  zona: clientOptionalString,
+})
+
+// Clients update endpoint. `patch` is partial — every field is optional and
+// nullable so the route can clear a value. zod strips unknown keys; the db
+// layer additionally filters by its UPDATEABLE_COLUMNS whitelist.
+const clientUpdatePatchSchema = z.object({
+  no_PHC: z.number().int().nonnegative().nullable().optional(),
+  ID_Tp_Cliente: z.number().int().positive().nullable().optional(),
+  nome: z.string().trim().min(1).nullable().optional(),
+  ncont: z.string().trim().min(1).nullable().optional(),
+  fax: z.string().trim().nullable().optional(),
+  telefone: z.string().trim().nullable().optional(),
+  contacto: z.string().trim().nullable().optional(),
+  morada: z.string().trim().min(1).nullable().optional(),
+  local: z.string().trim().min(1).nullable().optional(),
+  codpost: z.string().trim().min(1).nullable().optional(),
+  zona: z.string().trim().nullable().optional(),
+  Defense: z.boolean().nullable().optional(),
+})
+
+export const clientUpdateBodySchema = z.object({
+  id: z.number().int().positive(),
+  patch: clientUpdatePatchSchema.default({}),
+})
+
+export type ClientUpdateBody = z.infer<typeof clientUpdateBodySchema>
+
 // Sub-table reads take the order id as a query parameter (?orderId=N). Positive integer.
 // Mirrors orderIdParamSchema but bound to the `orderId` query key.
 export const orderIdQueryParamSchema = z
@@ -263,3 +362,16 @@ export const orderIdQueryParamSchema = z
   .pipe(z.number().int().positive())
 
 export type OrderIdQueryParam = z.infer<typeof orderIdQueryParamSchema>
+
+// Reference cascade query params. `area` is a non-empty string code (dbo.Area.ID_Area); an
+// absent `area` means "all products". `produto` is a positive integer (dbo.Produto.ID_Produto);
+// an absent `produto` means "all instruments". Both are optional so the same endpoints serve the
+// non-cascaded filters (which list every row) and the cascaded create/detail dropdowns.
+export const areaQueryParamSchema = z.string().trim().min(1).optional()
+
+export const produtoQueryParamSchema = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => (value === undefined ? undefined : Number(value)))
+  .pipe(z.number().int().positive().optional())

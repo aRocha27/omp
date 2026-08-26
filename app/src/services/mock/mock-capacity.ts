@@ -19,7 +19,7 @@ export function assertRecognitionCapacity(
   if (order.Sell_Price === null) {
     throw new RepositoryError(
       'server-error',
-      'O Sell Price é obrigatório para reconhecer valores.',
+      'Sell Price is required to recognise values.',
     )
   }
 
@@ -43,19 +43,19 @@ export function assertRecognitionCapacity(
   if (instrumentRecognized + warrantyRecognized > order.Sell_Price + MONEY_EPSILON) {
     throw new RepositoryError(
       'server-error',
-      'O total reconhecido não pode ultrapassar o Sell Price.',
+      'Total recognised cannot exceed the Sell Price.',
     )
   }
   if (warrantyRecognized > reserve + MONEY_EPSILON) {
     throw new RepositoryError(
       'server-error',
-      'O total reconhecido em garantia não pode ultrapassar a Warranty Reserve.',
+      'Total recognised under warranty cannot exceed the Warranty Reserve.',
     )
   }
   if (instrumentRecognized > order.Sell_Price - reserve + MONEY_EPSILON) {
     throw new RepositoryError(
       'server-error',
-      'O valor reservado para garantia não pode ser reconhecido com outro tipo de reconhecimento.',
+      'The warranty reserve cannot be recognised with another recognition type.',
     )
   }
 }
@@ -76,7 +76,7 @@ export function assertNetInvoicingCapacity(
   if (order.Sell_Price === null) {
     throw new RepositoryError(
       'server-error',
-      'O Sell Price é obrigatório para faturar valores.',
+      'Sell Price is required to invoice values.',
     )
   }
   const currentNet = rows.reduce(
@@ -86,7 +86,7 @@ export function assertNetInvoicingCapacity(
   if (currentNet + candidateValue > order.Sell_Price + MONEY_EPSILON) {
     throw new RepositoryError(
       'server-error',
-      'O net faturado não pode ultrapassar o Sell Price.',
+      'Net invoiced cannot exceed the Sell Price.',
     )
   }
 }

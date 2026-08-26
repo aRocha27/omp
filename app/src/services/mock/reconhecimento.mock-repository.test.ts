@@ -113,7 +113,7 @@ describe('MockReconhecimentoRepository', () => {
         }, 'editor'),
       ).rejects.toMatchObject({
         kind: 'server-error',
-        message: 'O total reconhecido não pode ultrapassar o Sell Price.',
+        message: 'Total recognised cannot exceed the Sell Price.',
       })
       expect(await repo.listByOrder(1002)).toHaveLength(2)
     })
@@ -161,7 +161,7 @@ describe('MockReconhecimentoRepository', () => {
       const repo = new MockReconhecimentoRepository()
       await expect(repo.update(4, { Valor_Reconhecimento: 125401 }, 'editor')).rejects.toMatchObject({
         kind: 'server-error',
-        message: 'O total reconhecido não pode ultrapassar o Sell Price.',
+        message: 'Total recognised cannot exceed the Sell Price.',
       })
       expect((await repo.listByOrder(1002)).find((row) => row.ID_Reconhecimento === 4))
         .toMatchObject({ Valor_Reconhecimento: 125400 })
@@ -209,7 +209,7 @@ describe('MockReconhecimentoRepository', () => {
       const repo = new MockReconhecimentoRepository()
       await expect(repo.propagate(1002, { kind: 'warranty' }, 'editor')).rejects.toMatchObject({
         kind: 'server-error',
-        message: 'O total reconhecido não pode ultrapassar o Sell Price.',
+        message: 'Total recognised cannot exceed the Sell Price.',
       })
       expect(await repo.listByOrder(1002)).toHaveLength(2)
     })
@@ -230,8 +230,40 @@ describe('MockReconhecimentoRepository', () => {
         kind: 'maintenance',
         startDate: '2025-01-01',
         years: 1,
+        recognitionDate: '2025-06-01',
       }, 'editor')
       expect(lines).toEqual([])
+    })
+
+    it('maintenance: catches elapsed installments up in the recognition month', async () => {
+      // Order 1007 is a CM order with Sell_Price 12000 and no existing rows.
+      const repo = new MockReconhecimentoRepository()
+      const lines = await repo.propagate(
+        1007,
+        {
+          kind: 'maintenance',
+          startDate: '2026-01-15',
+          years: 1,
+          recognitionDate: '2026-06-25',
+        },
+        'editor',
+      )
+
+      expect(lines).toHaveLength(12)
+      expect(lines.slice(0, 6).map((line) => line.DT_Reconhecimento)).toEqual(
+        Array.from({ length: 6 }, () => '2026-06-01T00:00:00.000Z'),
+      )
+      expect(lines.slice(6).map((line) => line.DT_Reconhecimento)).toEqual([
+        '2026-07-01T00:00:00.000Z',
+        '2026-08-01T00:00:00.000Z',
+        '2026-09-01T00:00:00.000Z',
+        '2026-10-01T00:00:00.000Z',
+        '2026-11-01T00:00:00.000Z',
+        '2026-12-01T00:00:00.000Z',
+      ])
+      expect(
+        lines.reduce((sum, line) => sum + (line.Valor_Reconhecimento ?? 0), 0),
+      ).toBe(12000)
     })
 
     it('throws not-found for an unknown order', async () => {

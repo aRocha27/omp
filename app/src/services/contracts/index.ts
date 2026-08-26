@@ -1,3 +1,7 @@
+export * from './dashboard.repository'
 export * from './orders.repository'
 export * from './reconhecimento.repository'
 export * from './documento-faturacao.repository'
+export * from './reference.repository'
+export * from './kit-consumable.repository'
+export * from './recognition-report.repository'

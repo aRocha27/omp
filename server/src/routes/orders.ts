@@ -10,6 +10,7 @@ import type {
   OkOrderUpdate,
   OkOrderCreate,
   OkReconhecimentos,
+  OkKitConsumables,
   OrderDetailRow,
   OrderSummaryRow,
   OrderUpdateChanges,
@@ -20,6 +21,9 @@ import type {
   ReconhecimentoPatch,
   FacturacaoPatch,
   PropagateReconhecimentoInput,
+  KitConsumableRow,
+  NewKitConsumableInput,
+  KitConsumablePatch,
 } from '../types.js'
 import { isHistoricoRow, isLockedCaracterizacaoField, type OrderListFilters } from '../db.js'
 import {
@@ -35,6 +39,9 @@ import {
   facturacaoCreateBodySchema,
   facturacaoDeleteBodySchema,
   facturacaoUpdateBodySchema,
+  kitConsumableCreateBodySchema,
+  kitConsumableDeleteBodySchema,
+  kitConsumableUpdateBodySchema,
 } from '../validation.js'
 import { RouteError, sendError, withPool } from './http-errors.js'
 
@@ -91,6 +98,17 @@ export interface OrdersDependencies {
     user: string,
   ) => Promise<DocumentoFaturacaoRow | null>
   deleteFacturacao: (pool: ConnectionPool, id: number) => Promise<boolean>
+  fetchKitConsumables: (pool: ConnectionPool, orderId: number) => Promise<KitConsumableRow[]>
+  addKitConsumable: (
+    pool: ConnectionPool,
+    input: NewKitConsumableInput,
+  ) => Promise<KitConsumableRow>
+  updateKitConsumable: (
+    pool: ConnectionPool,
+    id: number,
+    patch: KitConsumablePatch,
+  ) => Promise<KitConsumableRow | null>
+  deleteKitConsumable: (pool: ConnectionPool, id: number) => Promise<boolean>
 }
 
 type UserRole = 'viewer' | 'editor' | 'admin'
@@ -397,6 +415,86 @@ export function createOrdersRouter(
       sendError(response, error)
     }
   })
+
+  // Kit_Consumables sub-table — consumables drawn against a Kit order's Kit_Amount.
+  // The Saldo (Kit_Amount − Σ Total_Price) is computed client-side for display; the
+  // server applies no capacity constraint here (it is informational, not a hard limit).
+  router.get('/api/orders/kit-consumables', async (request: Request, response: Response) => {
+    try {
+      const orderId = orderIdQueryParamSchema.parse(request.query.orderId)
+      const connection = dependencies.resolveOrdersProfile()
+      const rows = await withPool(dependencies.openPool, connection, (pool) =>
+        dependencies.fetchKitConsumables(pool, orderId),
+      )
+      const payload: OkKitConsumables = { ok: true, rows }
+      response.json(payload)
+    } catch (error) {
+      sendError(response, error)
+    }
+  })
+
+  router.post('/api/orders/kit-consumables', async (request: Request, response: Response) => {
+    try {
+      const body = kitConsumableCreateBodySchema.parse(request.body)
+      const role = readUserRole(authorization, request.headers['x-user-role'])
+      if (role === 'viewer') {
+        throw new RouteError('forbidden', 403, 'Viewers may not add kit consumables.')
+      }
+      const connection = dependencies.resolveOrdersProfile()
+      const row = await withPool(dependencies.openPool, connection, (pool) =>
+        dependencies.addKitConsumable(pool, body),
+      )
+      response.status(201).json({ ok: true, row })
+    } catch (error) {
+      sendError(response, error)
+    }
+  })
+
+  router.post(
+    '/api/orders/kit-consumables/update',
+    async (request: Request, response: Response) => {
+      try {
+        const body = kitConsumableUpdateBodySchema.parse(request.body)
+        const role = readUserRole(authorization, request.headers['x-user-role'])
+        if (role === 'viewer') {
+          throw new RouteError('forbidden', 403, 'Viewers may not update kit consumables.')
+        }
+        const connection = dependencies.resolveOrdersProfile()
+        const row = await withPool(dependencies.openPool, connection, (pool) =>
+          dependencies.updateKitConsumable(pool, body.id, body.patch),
+        )
+        if (!row) {
+          throw new RouteError('not-found', 404, `Kit consumable ${body.id} was not found.`)
+        }
+        response.json({ ok: true, row })
+      } catch (error) {
+        sendError(response, error)
+      }
+    },
+  )
+
+  router.post(
+    '/api/orders/kit-consumables/delete',
+    async (request: Request, response: Response) => {
+      try {
+        const body = kitConsumableDeleteBodySchema.parse(request.body)
+        const role = readUserRole(authorization, request.headers['x-user-role'])
+        if (role === 'viewer') {
+          throw new RouteError('forbidden', 403, 'Viewers may not delete kit consumables.')
+        }
+        const connection = dependencies.resolveOrdersProfile()
+        const deleted = await withPool(dependencies.openPool, connection, (pool) =>
+          dependencies.deleteKitConsumable(pool, body.id),
+        )
+        if (!deleted) {
+          throw new RouteError('not-found', 404, `Kit consumable ${body.id} was not found.`)
+        }
+        response.json({ ok: true })
+      } catch (error) {
+        sendError(response, error)
+      }
+    },
+  )
 
   return router
 }

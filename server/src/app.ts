@@ -10,10 +10,15 @@ import {
   fetchAllTables,
   fetchUtilizadores,
   createUtilizador,
+  fetchAreas,
   fetchClientById,
   fetchClientSummaries,
+  createClient,
+  updateClient,
   fetchFacturacao,
   fetchFacturacaoTypes,
+  fetchInstrumentos,
+  fetchProdutos,
   addReconhecimento,
   updateReconhecimento,
   deleteReconhecimento,
@@ -21,10 +26,18 @@ import {
   addFacturacao,
   updateFacturacao,
   deleteFacturacao,
+  fetchKitConsumables,
+  addKitConsumable,
+  updateKitConsumable,
+  deleteKitConsumable,
   fetchOrderById,
   fetchOrderSummaries,
   fetchReconhecimentos,
   createOrder,
+  fetchDashboardSnapshot,
+  fetchRecognitionQueue,
+  fetchRecognitionReport,
+  fetchRecognitionReportOptions,
   fetchRows,
   listTables,
   openPool,
@@ -34,9 +47,15 @@ import { logger } from './logger.js'
 import { listProfileMetadata, resolveOrdersProfile, resolveProfile } from './profiles.js'
 import { createAdminRouter, type AdminDependencies } from './routes/admin.js'
 import { createClientsRouter, type ClientsDependencies } from './routes/clients.js'
+import { createDashboardRouter, type DashboardDependencies } from './routes/dashboard.js'
 import { createOrdersRouter, type OrdersDependencies } from './routes/orders.js'
+import { createReferenceRouter, type ReferenceDependencies } from './routes/reference.js'
 
-export type AppDependencies = AdminDependencies & OrdersDependencies & ClientsDependencies
+export type AppDependencies = AdminDependencies &
+  OrdersDependencies &
+  ClientsDependencies &
+  DashboardDependencies &
+  ReferenceDependencies
 
 type Environment = Record<string, string | undefined>
 
@@ -55,6 +74,10 @@ export function buildDefaultDependencies(environment: Environment = process.env)
     resolveOrdersProfile: () => resolveOrdersProfile(environment),
     fetchOrderSummaries,
     fetchOrderById,
+    fetchDashboardSnapshot,
+    fetchRecognitionQueue,
+    fetchRecognitionReport,
+    fetchRecognitionReportOptions,
     updateOrder,
     createOrder,
     fetchReconhecimentos,
@@ -67,8 +90,17 @@ export function buildDefaultDependencies(environment: Environment = process.env)
     addFacturacao,
     updateFacturacao,
     deleteFacturacao,
+    fetchKitConsumables,
+    addKitConsumable,
+    updateKitConsumable,
+    deleteKitConsumable,
     fetchClientSummaries,
     fetchClientById,
+    createClient,
+    updateClient,
+    fetchAreas,
+    fetchProdutos,
+    fetchInstrumentos,
   }
 }
 
@@ -87,7 +119,11 @@ export function createApp(
   app.use(createOrdersRouter(dependencies, {
     authenticatedAdmin: authConfig.token !== null,
   }))
-  app.use(createClientsRouter(dependencies))
+  app.use(createClientsRouter(dependencies, {
+    authenticatedAdmin: authConfig.token !== null,
+  }))
+  app.use(createDashboardRouter(dependencies))
+  app.use(createReferenceRouter(dependencies))
   app.use(errorHandler)
 
   return app

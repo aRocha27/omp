@@ -100,6 +100,16 @@ export type OrderSummaryRow = {
   Sell_Price: number | null
   Negocio_Fechado: boolean | null
   Encomenda_Cli_PHC: string | null
+  // Order-table-only columns the view does not project. Joined from dbo.[Order] so the list
+  // can render the full 19-column grid without a second round-trip per row. Verified
+  // 2026-08-25 against BRKR_ERP.
+  Kit: boolean | null
+  ID_Tp_Warranty: number | null
+  Warranty_Reserve: number | null
+  Warranty_DT_Inicio: string | null
+  Orc_Proposta: string | null
+  PO_Cliente: string | null
+  ID_Tp_Revenue: number | null
   // Provisoria flags a provisional order. Provisional rows are always editable even when
   // histórico (past month) — the "bloqueio de caracterização após fecho do mês" rule only
   // locks non-provisional histórico orders. Sourced from V_Order_List (bit column).
@@ -115,19 +125,12 @@ export type OrderSummaryRow = {
 export type OrderDetailRow = OrderSummaryRow & {
   /** dbo.Tipo.Warranty, resolved by joining Order.ID_Tipo to Tipo.ID_Tipo. */
   Tipo_Warranty: boolean | null
-  Orc_Proposta: string | null
-  PO_Cliente: string | null
-  ID_Tp_Warranty: number | null
-  Warranty_Reserve: number | null
-  Warranty_DT_Inicio: string | null
-  ID_Tp_Revenue: number | null
   Facturado: boolean | null
   Reconhecido: boolean | null
   Cod_Enc_Fornecedor: string | null
   Obs: string | null
   ID_User: string | null
   DT_User: string | null
-  Kit: boolean | null
   Kit_Amount: number | null
   Contacto: string | null
 }
@@ -152,6 +155,113 @@ export type OkOrderCreate = {
   order: OrderDetailRow
 }
 
+export type DashboardKpisRow = {
+  ordersBookedYtd: number
+  nobYtd: number
+  revenueRecognizedYtd: number
+  backlogToRecognize: number
+  backlogAtPeriodStart: number
+}
+
+export type DashboardTrendPointRow = {
+  monthStart: string
+  revenue: number
+  nob: number
+}
+
+export type DashboardRecognitionQueueRow = {
+  idOrder: number | null
+  encPhc: string | null
+  orderDate: string | null
+  client: string | null
+  area: string | null
+  product: string | null
+  type: string | null
+  sellPrice: number | null
+  recognizedValue: number | null
+  remainingValue: number | null
+  invoiced: boolean | null
+}
+
+export type DashboardSnapshotRow = {
+  year: number
+  kpis: DashboardKpisRow
+  monthlyTrend: DashboardTrendPointRow[]
+  recognitionQueue: DashboardRecognitionQueueRow[]
+  recentOrders: OrderSummaryRow[]
+}
+
+export type OkDashboard = {
+  ok: true
+  dashboard: DashboardSnapshotRow
+}
+
+export type OkRecognitionQueue = {
+  ok: true
+  recognitionQueue: DashboardRecognitionQueueRow[]
+}
+
+/**
+ * Row shape for the Recognition report (crosstab view
+ * `dbo.V_Reconhecimento_Monthly_Crosstab`).
+ *
+ * Dimensions:
+ *  - `Year_Recognition` is nullable in the source view: rows whose year
+ *    couldn't be derived from the recognition date still appear, with NULL.
+ *  - `Cliente` is the raw client name from the view, used as display text.
+ *
+ * Measures:
+ *  - `Sell_Price` (one column, year-agnostic): the order sell price.
+ *  - The 12 monthly values are decimal numbers (may be 0 for a month with no
+ *    recognition posting on that row).
+ *  - `Total_Year` matches the sum of the 12 month columns for the same row
+ *    (the view's own column — kept verbatim so the spreadsheet matches the
+ *    server-rendered numbers exactly).
+ */
+export interface RecognitionReportRow {
+  yearRecognition: number | null
+  area: string | null
+  grpReport: string | null
+  tipo: string | null
+  produto: string | null
+  encomendaCliPHC: string | null
+  cliente: string | null
+  sellPrice: number | null
+  tpReconhecimento: string | null
+  january: number
+  february: number
+  march: number
+  april: number
+  may: number
+  june: number
+  july: number
+  august: number
+  september: number
+  october: number
+  november: number
+  december: number
+  totalYear: number
+}
+
+export interface RecognitionReportOptions {
+  years: number[]
+  areas: string[]
+  grpReports: string[]
+  tipos: string[]
+  produtos: string[]
+  encomendas: string[]
+}
+
+export type OkRecognitionReport = {
+  ok: true
+  rows: RecognitionReportRow[]
+}
+
+export type OkRecognitionReportOptions = {
+  ok: true
+  options: RecognitionReportOptions
+}
+
 // Subset of dbo.[Order] columns an editor may patch. Column names mirror the SQL columns
 // exactly (snake_case, uppercase) so the db layer can build the SET clause without
 // translation. Every field is optional; the route enforces which fields a given role may
@@ -159,6 +269,7 @@ export type OkOrderCreate = {
 // client. Keep this list in sync with UPDATEABLE_COLUMNS in db.ts.
 export type OrderUpdatePatch = {
   DT_Order?: string | null
+  Order_Factory?: boolean | null
   ID_Tp_Order?: string | null
   Encomenda_Cli_PHC?: string | null
   ID_Client?: number | null
@@ -190,11 +301,12 @@ export type OrderUpdateChanges = OrderUpdatePatch & {
 
 export type OrderCreateInput = Omit<
   OrderUpdatePatch,
-  'Facturado' | 'Reconhecido' | 'Negocio_Fechado'
+  'Facturado' | 'Reconhecido' | 'Negocio_Fechado' | 'ID_Tp_Revenue'
 > & {
   DT_Order: string
   ID_Tp_Order: string
   ID_Client: number
+  ID_Tp_Revenue: number
 }
 
 export type ProfileMetadata = {
@@ -246,6 +358,56 @@ export type OkClient = {
   client: ClientDetailRow | null
 }
 
+export type OkClientCreate = {
+  ok: true
+  client: ClientDetailRow
+}
+
+export type OkClientUpdate = {
+  ok: true
+  client: ClientDetailRow
+}
+
+// Wire shape for `POST /api/clients`. The seven user-required fields are mandatory;
+// everything else is optional so the form can flesh out a client over time. Field
+// names match dbo.Client columns (snake_case uppercase) so the db layer builds the
+// INSERT clause without translation.
+export type ClientCreateInput = {
+  nome: string
+  morada: string
+  local: string
+  codpost: string
+  no_PHC: number
+  ncont: string
+  ID_Tp_Cliente: number
+  telefone?: string | null
+  contacto?: string | null
+  fax?: string | null
+  zona?: string | null
+}
+
+// Wire shape for `POST /api/clients/update`. `patch` is partial — every field is
+// optional and nullable (so the route can clear a value by sending null). The
+// `user` field is added by the route from the request context, never from the body.
+export type ClientUpdatePatch = {
+  no_PHC?: number | null
+  ID_Tp_Cliente?: number | null
+  nome?: string | null
+  ncont?: string | null
+  fax?: string | null
+  telefone?: string | null
+  contacto?: string | null
+  morada?: string | null
+  local?: string | null
+  codpost?: string | null
+  zona?: string | null
+  Defense?: boolean | null
+}
+
+export type ClientUpdateChanges = ClientUpdatePatch & {
+  user: string
+}
+
 // Order sub-table rows. Field names mirror the frontend models exactly
 // (app/src/domain/models/reconhecimento.ts, documento-faturacao.ts) so the HTTP repos map
 // cleanly. `upsize_ts` is intentionally omitted (opaque, never serialized). Verified
@@ -264,6 +426,17 @@ export type DocumentoFaturacaoTypeRow = {
   id: string
   label: string
 }
+
+// Reference cascade rows for Área → Produto → Instrumento (dbo.Area/Produto/Instrumento).
+// `area` on Produto and `produto` on Instrumento carry the parent id so the frontend can drive
+// dependent dropdowns without a second round-trip. Verified 2026-08-25 against BRKR_ERP.
+export type AreaRow = { id: string; label: string }
+export type ProdutoRow = { id: number; label: string; area: string | null }
+export type InstrumentoRow = { id: number; label: string; produto: number | null }
+
+export type OkAreas = { ok: true; areas: AreaRow[] }
+export type OkProdutos = { ok: true; produtos: ProdutoRow[] }
+export type OkInstrumentos = { ok: true; instrumentos: InstrumentoRow[] }
 
 export type DocumentoFaturacaoRow = {
   ID_Facturacao: number
@@ -285,6 +458,46 @@ export type OkFacturacao = {
   ok: true
   rows: DocumentoFaturacaoRow[]
 }
+
+// Kit_Consumables sub-table. Mirrors dbo.Kit_Consumables (verified 2026-08-25 against
+// BRKR_ERP): ID_Kit int PK (identity), ID_Order int (→ dbo.[Order]), Date datetime,
+// Internal_Order/Material/Description nvarchar, Quant int, Unit_Price/Total_Price money.
+// Unlike Reconhecimento/Facturacao this table has no ID_User/DT_User audit columns, so
+// none are exposed. Field names mirror app/src/domain/models/kit-consumable.ts exactly.
+export type KitConsumableRow = {
+  ID_Kit: number
+  ID_Order: number
+  Date: string | null
+  Internal_Order: string | null
+  Material: string | null
+  Description: string | null
+  Quant: number | null
+  Unit_Price: number | null
+  Total_Price: number | null
+}
+
+export type OkKitConsumables = {
+  ok: true
+  rows: KitConsumableRow[]
+}
+
+export type NewKitConsumableInput = {
+  ID_Order: number
+  Date: string
+  Internal_Order: string
+  Material: string
+  Description: string
+  Quant: number
+  Unit_Price: number
+  Total_Price: number
+}
+
+export type KitConsumablePatch = Partial<
+  Pick<
+    KitConsumableRow,
+    'Date' | 'Internal_Order' | 'Material' | 'Description' | 'Quant' | 'Unit_Price' | 'Total_Price'
+  >
+>
 
 export type NewReconhecimentoInput = {
   ID_Order: number
@@ -319,6 +532,7 @@ export type PropagateReconhecimentoInput =
       kind: 'maintenance'
       startDate: string
       years: number
+      recognitionDate: string
     }
 
 export type UtilizadorRow = {

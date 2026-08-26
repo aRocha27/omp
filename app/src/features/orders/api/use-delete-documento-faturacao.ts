@@ -8,7 +8,7 @@ import type { DocumentoFaturacao } from '@/domain/models/documento-faturacao'
  * `DocumentoFaturacaoRepository` (dbo.Facturacao has no deleted_at).
  *
  * The row is removed optimistically from the invoicing list cache (with a
- * snapshot rolled back on error) so the Faturação tab drops it instantly rather
+ * snapshot rolled back on error) so the Invoicing tab drops it instantly rather
  * than waiting for a refetch. The detail query is invalidated in the background
  * so the order's `Facturado` flag catches up.
  */

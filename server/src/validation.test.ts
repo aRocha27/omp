@@ -113,17 +113,27 @@ describe('order sub-table mutation validation', () => {
       reconhecimentoPropagateBodySchema.safeParse({ orderId: 101, kind: 'maintenance' }).success,
     ).toBe(false)
     expect(
+      reconhecimentoPropagateBodySchema.safeParse({
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 3,
+      }).success,
+    ).toBe(false)
+    expect(
       reconhecimentoPropagateBodySchema.parse({
         orderId: 101,
         kind: 'maintenance',
         startDate: '2027-02-18',
         years: 3,
+        recognitionDate: '2027-06-21',
       }),
     ).toEqual({
       orderId: 101,
       kind: 'maintenance',
       startDate: '2027-02-18',
       years: 3,
+      recognitionDate: '2027-06-21',
     })
     expect(
       reconhecimentoPropagateBodySchema.safeParse({
@@ -131,6 +141,7 @@ describe('order sub-table mutation validation', () => {
         kind: 'maintenance',
         startDate: '2027-02-18',
         years: 1.5,
+        recognitionDate: '2027-06-21',
       }).success,
     ).toBe(false)
     expect(
@@ -139,6 +150,16 @@ describe('order sub-table mutation validation', () => {
         kind: 'maintenance',
         startDate: '2027-02-18',
         years: 101,
+        recognitionDate: '2027-06-21',
+      }).success,
+    ).toBe(false)
+    expect(
+      reconhecimentoPropagateBodySchema.safeParse({
+        orderId: 101,
+        kind: 'maintenance',
+        startDate: '2027-02-18',
+        years: 1,
+        recognitionDate: 'not-a-date',
       }).success,
     ).toBe(false)
   })

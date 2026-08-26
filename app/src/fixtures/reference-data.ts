@@ -10,6 +10,14 @@
  * the data is baked in for now).
  */
 
+import type {
+  AreaOption,
+  InstrumentoOption,
+  ProdutoOption,
+} from '@/domain/models/reference-cascade'
+
+export type { AreaOption, InstrumentoOption, ProdutoOption }
+
 export interface ReferenceOption {
   id: string | number
   label: string
@@ -34,14 +42,14 @@ export const orderTypes: readonly ReferenceOption[] = [
   { id: 'W', label: 'Warranty' },
   { id: 'WPO', label: 'Waiting PO Customer' },
   { id: 'COM', label: 'Comercial' },
-  { id: 'CANC', label: 'ANULADO' },
+  { id: 'CANC', label: 'CANCELLED' },
   { id: 'CFA', label: 'Client FactoryDirect' },
   { id: 'SAP', label: 'Introduzir SAP' },
   { id: 'SAPST', label: 'SAP Stock' },
 ]
 
 /** Business area (`Order.ID_Area`, string code). */
-export const areas: readonly ReferenceOption[] = [
+export const areas: readonly AreaOption[] = [
   { id: 'BDAL', label: 'BDAL' },
   { id: 'BOPT', label: 'BOPT' },
 ]
@@ -69,64 +77,74 @@ export function resolveTipoWarranty(idTipo: string | null | undefined): boolean 
   return match ? match.warranty : null
 }
 
-/** Product (`Order.ID_Produto`, number). */
-export const produtos: readonly ReferenceOption[] = [
-  { id: 1, label: 'MIR' },
-  { id: 2, label: 'NIR' },
-  { id: 3, label: 'Raman' },
-  { id: 5, label: 'LAB GC / SQ-MS Service' },
-  { id: 6, label: 'GC-MS / LC-MS' },
-  { id: 7, label: 'ESI Ion Trap' },
-  { id: 8, label: 'ESI TOF' },
-  { id: 9, label: 'FTMS' },
-  { id: 10, label: 'Maldi-TOF' },
-  { id: 11, label: 'MALDI BT' },
-  { id: 12, label: 'RS' },
-  { id: 13, label: 'CML' },
+/**
+ * Product (`Order.ID_Produto`, number). `area` mirrors `dbo.Produto.ID_Area` so the
+ * cascade dropdown can filter produtos by the selected área (BDAL/BOPT). Verified
+ * 2026-08-25 against BRKR_ERP: 1,2,3,12,13→BOPT; 5,6,7,8,9,10,11→BDAL.
+ */
+export const produtos: readonly ProdutoOption[] = [
+  { id: 1, label: 'MIR', area: 'BOPT' },
+  { id: 2, label: 'NIR', area: 'BOPT' },
+  { id: 3, label: 'Raman', area: 'BOPT' },
+  { id: 5, label: 'LAB GC / SQ-MS Service', area: 'BDAL' },
+  { id: 6, label: 'GC-MS / LC-MS', area: 'BDAL' },
+  { id: 7, label: 'ESI Ion Trap', area: 'BDAL' },
+  { id: 8, label: 'ESI TOF', area: 'BDAL' },
+  { id: 9, label: 'FTMS', area: 'BDAL' },
+  { id: 10, label: 'Maldi-TOF', area: 'BDAL' },
+  { id: 11, label: 'MALDI BT', area: 'BDAL' },
+  { id: 12, label: 'RS', area: 'BOPT' },
+  { id: 13, label: 'CML', area: 'BOPT' },
 ]
 
-/** Instrument (`Order.ID_Instrumento`, number). */
-export const instrumentos: readonly ReferenceOption[] = [
-  { id: 1, label: 'VERTEX 70' },
-  { id: 2, label: 'LCMS' },
-  { id: 4, label: 'GC 43X' },
-  { id: 5, label: 'UltrafleXtreme' },
-  { id: 7, label: 'Sampler GC' },
-  { id: 8, label: 'Impact II' },
-  { id: 10, label: 'TENSOR 27' },
-  { id: 11, label: 'MPA' },
-  { id: 12, label: 'SCION TQ/456 GC' },
-  { id: 13, label: 'TANGO R' },
-  { id: 15, label: 'ALPHA' },
-  { id: 16, label: 'AutoFlex TOF/TOF' },
-  { id: 17, label: 'SCION TQ/436 GC' },
-  { id: 18, label: 'Hyperion' },
-  { id: 19, label: 'Matrix-F/MF' },
-  { id: 20, label: 'IFS125 HR/M' },
-  { id: 21, label: 'FTMS 7' },
-  { id: 22, label: 'Esquire' },
-  { id: 23, label: 'MALDI Biotyper (Rental)' },
-  { id: 24, label: 'Vector 22' },
-  { id: 25, label: 'ATR' },
-  { id: 26, label: 'MultiRAM' },
-  { id: 27, label: 'TQMS' },
-  { id: 28, label: 'Equinox 55' },
-  { id: 29, label: 'SCION SQ/456 GC' },
-  { id: 30, label: 'maXis impact' },
-  { id: 31, label: 'SCION SQ/436 GC' },
-  { id: 32, label: 'GC 45X' },
-  { id: 34, label: 'Vector 22N' },
-  { id: 35, label: 'Impact HD' },
-  { id: 36, label: 'EM27' },
-  { id: 57, label: 'SIGIS' },
-  { id: 70, label: 'MALDI Biotyper (Straight Sale)' },
+/**
+ * Instrument (`Order.ID_Instrumento`, number). `produto` mirrors
+ * `dbo.Instrumento.ID_Produto` so the cascade dropdown can filter instrumentos by
+ * the selected produto. Verified 2026-08-25 against BRKR_ERP (id→ID_Produto).
+ * The fixture holds the subset with labels harvested for label resolution/filter
+ * dropdowns; the live `/api/instrumentos` endpoint returns the full 91-row set.
+ */
+export const instrumentos: readonly InstrumentoOption[] = [
+  { id: 1, label: 'VERTEX 70', produto: 1 },
+  { id: 2, label: 'LCMS', produto: 6 },
+  { id: 4, label: 'GC 43X', produto: 5 },
+  { id: 5, label: 'UltrafleXtreme', produto: 10 },
+  { id: 7, label: 'Sampler GC', produto: 6 },
+  { id: 8, label: 'Impact II', produto: 8 },
+  { id: 10, label: 'TENSOR 27', produto: 13 },
+  { id: 11, label: 'MPA', produto: 2 },
+  { id: 12, label: 'SCION TQ/456 GC', produto: 6 },
+  { id: 13, label: 'TANGO R', produto: 2 },
+  { id: 15, label: 'ALPHA', produto: 13 },
+  { id: 16, label: 'AutoFlex TOF/TOF', produto: 10 },
+  { id: 17, label: 'SCION TQ/436 GC', produto: 6 },
+  { id: 18, label: 'Hyperion', produto: 1 },
+  { id: 19, label: 'Matrix-F/MF', produto: 2 },
+  { id: 20, label: 'IFS125 HR/M', produto: 1 },
+  { id: 21, label: 'FTMS 7', produto: 9 },
+  { id: 22, label: 'Esquire', produto: 7 },
+  { id: 23, label: 'MALDI Biotyper (Rental)', produto: 11 },
+  { id: 24, label: 'Vector 22', produto: 13 },
+  { id: 25, label: 'ATR', produto: 13 },
+  { id: 26, label: 'MultiRAM', produto: 3 },
+  { id: 27, label: 'TQMS', produto: 6 },
+  { id: 28, label: 'Equinox 55', produto: 1 },
+  { id: 29, label: 'SCION SQ/456 GC', produto: 5 },
+  { id: 30, label: 'maXis impact', produto: 8 },
+  { id: 31, label: 'SCION SQ/436 GC', produto: 5 },
+  { id: 32, label: 'GC 45X', produto: 5 },
+  { id: 34, label: 'Vector 22N', produto: 2 },
+  { id: 35, label: 'Impact HD', produto: 8 },
+  { id: 36, label: 'EM27', produto: 12 },
+  { id: 57, label: 'SIGIS', produto: 12 },
+  { id: 70, label: 'MALDI Biotyper (Straight Sale)', produto: 11 },
 ]
 
 /** Warranty type (`Order.ID_Tp_Warranty`, number). */
 export const warrantyTypes: readonly ReferenceOption[] = [
-  { id: 1, label: '1 Ano' },
-  { id: 2, label: '2 Anos' },
-  { id: 3, label: '3 Anos' },
+  { id: 1, label: '1 Year' },
+  { id: 2, label: '2 Years' },
+  { id: 3, label: '3 Years' },
 ]
 
 /** Revenue type (`Order.ID_Tp_Revenue`, number). */
@@ -138,11 +156,11 @@ export const revenueTypes: readonly ReferenceOption[] = [
 
 /** Revenue recognition type (`Reconhecimento.ID_Tp_Reconhecimento`, string). Harvested from dbo.Tp_Reconhecimento. */
 export const tpReconhecimentos: readonly ReferenceOption[] = [
-  { id: 'CM', label: 'C Manut' },
-  { id: 'P', label: 'Parcial' },
+  { id: 'CM', label: 'Maintenance Contract' },
+  { id: 'P', label: 'Partial' },
   { id: 'T', label: 'Total' },
   { id: 'W', label: 'Warranty' },
-  { id: 'WP', label: 'Warranty Parcial' },
+  { id: 'WP', label: 'Warranty Partial' },
 ]
 
 /** Warranty type codes (W/WP) — used to split recognition totals into Instrument vs Warranty. */
@@ -150,9 +168,9 @@ export const WARRANTY_RECONHECIMENTO_CODES: readonly string[] = ['W', 'WP']
 
 /** Invoicing document type (`Facturacao.ID_Tp_Doc_FT`, string). Harvested from dbo.Tp_Doc_FT. */
 export const tpDocFts: readonly ReferenceOption[] = [
-  { id: 'AcFT', label: 'Acerto Factura' },
-  { id: 'FT', label: 'Factura' },
-  { id: 'NC', label: 'Nota Crédito' },
+  { id: 'AcFT', label: 'Invoice Adjustment' },
+  { id: 'FT', label: 'Invoice' },
+  { id: 'NC', label: 'Credit Note' },
 ]
 
 /** Client type (`Client.ID_Tp_Cliente`, number). Harvested from dbo.Tp_Cliente. */

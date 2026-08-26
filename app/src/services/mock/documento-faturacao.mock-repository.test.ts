@@ -13,9 +13,9 @@ describe('MockDocumentoFaturacaoRepository', () => {
     it('returns the Tp_Doc_FT options used by mock mode', async () => {
       const repo = new MockDocumentoFaturacaoRepository()
       await expect(repo.listTypes()).resolves.toEqual([
-        { id: 'AcFT', label: 'Acerto Factura' },
-        { id: 'FT', label: 'Factura' },
-        { id: 'NC', label: 'Nota Crédito' },
+        { id: 'AcFT', label: 'Invoice Adjustment' },
+        { id: 'FT', label: 'Invoice' },
+        { id: 'NC', label: 'Credit Note' },
       ])
     })
   })
@@ -129,7 +129,7 @@ describe('MockDocumentoFaturacaoRepository', () => {
         }, 'editor'),
       ).rejects.toMatchObject({
         kind: 'server-error',
-        message: 'O net faturado não pode ultrapassar o Sell Price.',
+        message: 'Net invoiced cannot exceed the Sell Price.',
       })
       expect(await repo.listByOrder(1002)).toHaveLength(3)
     })
@@ -178,7 +178,7 @@ describe('MockDocumentoFaturacaoRepository', () => {
       const repo = new MockDocumentoFaturacaoRepository()
       await expect(repo.update(3, { Valor_Doc_FT: 70000 }, 'editor')).rejects.toMatchObject({
         kind: 'server-error',
-        message: 'O net faturado não pode ultrapassar o Sell Price.',
+        message: 'Net invoiced cannot exceed the Sell Price.',
       })
       expect((await repo.listByOrder(1002)).find((row) => row.ID_Facturacao === 3))
         .toMatchObject({ Valor_Doc_FT: 66000 })

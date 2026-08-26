@@ -11,7 +11,13 @@
 import { env } from '@/app/configuration/env'
 import type { Client, ClientSearchFilters, ClientSummary } from '@/domain/models/client'
 import { normaliseClientFilters } from '@/domain/models/client'
-import { RepositoryError, type ClientsRepository } from '@/services/contracts/clients.repository'
+import type { RoleLike } from '@/domain/models/user'
+import {
+  RepositoryError,
+  type ClientCreateInput,
+  type ClientUpdatePatch,
+  type ClientsRepository,
+} from '@/services/contracts/clients.repository'
 
 const LIST_LIMIT = 200
 
@@ -25,6 +31,14 @@ interface OkClientsResponse {
 interface OkClientResponse {
   ok: true
   client: DetailRow | null
+}
+interface OkClientCreateResponse {
+  ok: true
+  client: DetailRow
+}
+interface OkClientUpdateResponse {
+  ok: true
+  client: DetailRow
 }
 interface ApiFailure {
   ok: false
@@ -44,6 +58,26 @@ export class HttpClientsRepository implements ClientsRepository {
     const data = await getJson<OkClientResponse | ApiFailure>(`/clients?id=${id}`)
     if (!data.ok) throw toRepositoryError(data, 404)
     return data.client === null ? null : toClient(data.client)
+  }
+
+  async create(input: ClientCreateInput, role: RoleLike): Promise<Client> {
+    const data = await postJson<OkClientCreateResponse | ApiFailure>(
+      '/clients',
+      input,
+      role,
+    )
+    if (!data.ok) throw toRepositoryError(data, 400)
+    return toClient(data.client)
+  }
+
+  async update(id: number, patch: ClientUpdatePatch, role: RoleLike): Promise<Client> {
+    const data = await postJson<OkClientUpdateResponse | ApiFailure>(
+      '/clients/update',
+      { id, patch },
+      role,
+    )
+    if (!data.ok) throw toRepositoryError(data, 404)
+    return toClient(data.client)
   }
 }
 
@@ -93,10 +127,13 @@ async function getJson<T>(path: string): Promise<T> {
   return requestJson<T>(path, { method: 'GET' })
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+async function postJson<T>(path: string, body: unknown, role?: RoleLike): Promise<T> {
   return requestJson<T>(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(role ? { 'x-user-role': role } : {}),
+    },
     body: JSON.stringify(body),
   })
 }

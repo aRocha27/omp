@@ -211,7 +211,7 @@ describe('MockOrdersRepository', () => {
         DT_Reconhecimento: '2025-11-01T00:00:00Z',
         Valor_Reconhecimento: 1_001,
       }, 'editor')).rejects.toMatchObject({
-        message: 'O total reconhecido não pode ultrapassar o Sell Price.',
+        message: 'Total recognised cannot exceed the Sell Price.',
       })
       await expect(invoicingRepo.add({
         ID_Order: 1004,
@@ -220,7 +220,7 @@ describe('MockOrdersRepository', () => {
         DT_Doc_FT: '2025-11-01T00:00:00Z',
         Valor_Doc_FT: 1_001,
       }, 'editor')).rejects.toMatchObject({
-        message: 'O net faturado não pode ultrapassar o Sell Price.',
+        message: 'Net invoiced cannot exceed the Sell Price.',
       })
     })
 
@@ -231,7 +231,7 @@ describe('MockOrdersRepository', () => {
       await expect(
         ordersRepo.update(1001, { Sell_Price: 35_000 }, 'editor'),
       ).rejects.toMatchObject({
-        message: 'O total reconhecido não pode ultrapassar o Sell Price.',
+        message: 'Total recognised cannot exceed the Sell Price.',
       })
       expect((await ordersRepo.getById(1001))?.Sell_Price).toBe(48_500)
     })
@@ -298,7 +298,7 @@ describe('MockOrdersRepository', () => {
       await expect(
         ordersRepo.update(created.ID_Order, { Sell_Price: 700 }, 'editor'),
       ).rejects.toMatchObject({
-        message: 'O net faturado não pode ultrapassar o Sell Price.',
+        message: 'Net invoiced cannot exceed the Sell Price.',
       })
       expect((await ordersRepo.getById(created.ID_Order))?.Sell_Price).toBe(1_000)
     })

@@ -107,7 +107,7 @@ export class MockOrdersRepository implements OrdersRepository {
 
   async update(id: number, patch: OrderUpdatePatch, role: Role): Promise<Order> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para alterar pedidos.')
+    assertMockMutationRole(role, 'No permission to change orders.')
     // Mutate the per-instance copy so the next `getById` is consistent with the
     // edit, mirroring how the live DB persists the change — without touching the
     // shared fixture (which would pollute other test renders).
@@ -141,7 +141,7 @@ export class MockOrdersRepository implements OrdersRepository {
 
   async create(input: OrderCreateInput, role: Role): Promise<Order> {
     await delay(MOCK_LATENCY_MS)
-    assertMockMutationRole(role, 'Sem permissão para criar pedidos.')
+    assertMockMutationRole(role, 'No permission to create orders.')
     const order: Order = {
       ID_Order: Math.max(...this.rows.map((row) => row.ID_Order), 0) + 1,
       DT_Order: input.DT_Order ?? new Date().toISOString(),

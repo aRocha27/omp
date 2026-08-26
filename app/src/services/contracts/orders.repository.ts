@@ -18,6 +18,7 @@ export type OrderUpdatePatch = Partial<
   Pick<
     Order,
     | 'DT_Order'
+    | 'Order_Factory'
     | 'ID_Tp_Order'
     | 'Encomenda_Cli_PHC'
     | 'ID_Client'

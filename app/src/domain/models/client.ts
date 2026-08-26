@@ -41,7 +41,7 @@ export interface Client {
 /**
  * Client list filters.
  *
- * `search` is a contains-match over name/tax no./PHC no. (the backend decides the
+ * `search` is a contains-match over name/tax no./SAP no. (the backend decides the
  * columns). `idTpCliente` is a multi-select of client-type codes — a row matches if
  * its `ID_Tp_Cliente` is in the set. Empty string / empty array mean "no filter".
  */

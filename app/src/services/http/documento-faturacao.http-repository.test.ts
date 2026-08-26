@@ -48,9 +48,9 @@ describe('HttpDocumentoFaturacaoRepository', () => {
   describe('listTypes', () => {
     it('GETs the live Tp_Doc_FT endpoint and returns descriptive options', async () => {
       const types = [
-        { id: 'AcFT', label: 'Acerto Factura' },
-        { id: 'FT', label: 'Factura' },
-        { id: 'NC', label: 'Nota Crédito' },
+        { id: 'AcFT', label: 'Invoice Adjustment' },
+        { id: 'FT', label: 'Invoice' },
+        { id: 'NC', label: 'Credit Note' },
       ]
       fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, types }))
 
@@ -160,11 +160,11 @@ describe('HttpDocumentoFaturacaoRepository', () => {
 
     it('maps a net-exceeding 422 to a server-error RepositoryError', async () => {
       fetchMock.mockResolvedValueOnce(
-        jsonResponse(422, { ok: false, code: 'validation', message: 'Net faturado > Sell Price.' }),
+        jsonResponse(422, { ok: false, code: 'validation', message: 'Net invoiced > Sell Price.' }),
       )
       await expect(repo.update(1, { Valor_Doc_FT: 999999 }, 'editor')).rejects.toMatchObject({
         kind: 'server-error',
-        message: 'Net faturado > Sell Price.',
+        message: 'Net invoiced > Sell Price.',
       })
     })
   })

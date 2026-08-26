@@ -2,21 +2,31 @@ import { createRequire } from 'node:module'
 import type { config as SqlConfig, ConnectionPool, ISqlType } from 'mssql'
 import { logger } from './logger.js'
 import type {
+  AreaRow,
+  ClientCreateInput,
   ClientDetailRow,
   ClientSummaryRow,
+  ClientUpdateChanges,
   ConnectionConfig,
+  DashboardRecognitionQueueRow,
+  DashboardSnapshotRow,
   DocumentoFaturacaoRow,
   DocumentoFaturacaoTypeRow,
+  InstrumentoRow,
   OrderDetailRow,
   OrderCreateInput,
   OrderSummaryRow,
   OrderUpdateChanges,
+  ProdutoRow,
   ReconhecimentoRow,
   NewReconhecimentoInput,
   NewFacturacaoInput,
   ReconhecimentoPatch,
   FacturacaoPatch,
   PropagateReconhecimentoInput,
+  KitConsumableRow,
+  NewKitConsumableInput,
+  KitConsumablePatch,
   UtilizadorRow,
   TableInfo,
   TableRows,
@@ -43,7 +53,10 @@ const ORDERS_VIEW = 'V_Order_List'
 const ORDERS_TABLE = 'Order'
 const CLIENT_TABLE = 'Client'
 const RECONHECIMENTO_TABLE = 'Reconhecimento'
+const RECOGNITION_BACKLOG_VIEW = '11-Reconhecimento-PorReconhecer'
+const RECOGNITION_MONTHLY_VIEW = 'V_Reconhecimento_Monthly_Crosstab'
 const FACTURACAO_TABLE = 'Facturacao'
+const KIT_CONSUMABLES_TABLE = 'Kit_Consumables'
 const MONEY_EPSILON = 0.00005
 const PROPAGATION_CHUNK_SIZE = 500
 
@@ -66,6 +79,19 @@ const FACTURACAO_UPDATEABLE_COLUMNS: ReadonlyArray<{
   { column: 'Valor_Doc_FT', type: mssql.Money },
 ]
 
+const KIT_CONSUMABLES_UPDATEABLE_COLUMNS: ReadonlyArray<{
+  column: keyof KitConsumablePatch
+  type: ISqlType | (() => ISqlType)
+}> = [
+  { column: 'Date', type: mssql.DateTime },
+  { column: 'Internal_Order', type: mssql.NVarChar },
+  { column: 'Material', type: mssql.NVarChar },
+  { column: 'Description', type: mssql.NVarChar },
+  { column: 'Quant', type: mssql.Int },
+  { column: 'Unit_Price', type: mssql.Money },
+  { column: 'Total_Price', type: mssql.Money },
+]
+
 // Hardcoded whitelist of dbo.[Order] columns an editor may UPDATE. Column names are
 // constants (never user input), so building the SET clause from this list is safe by
 // construction — there is no injection surface. Each entry pairs the column with its
@@ -73,6 +99,7 @@ const FACTURACAO_UPDATEABLE_COLUMNS: ReadonlyArray<{
 // keys in sync with OrderUpdatePatch in types.ts.
 const UPDATEABLE_COLUMNS: ReadonlyArray<{ column: string; type: ISqlType | (() => ISqlType) }> = [
   { column: 'DT_Order', type: mssql.DateTime },
+  { column: 'Order_Factory', type: mssql.Bit },
   { column: 'ID_Tp_Order', type: mssql.NVarChar },
   { column: 'Encomenda_Cli_PHC', type: mssql.NVarChar },
   { column: 'ID_Client', type: mssql.Int },
@@ -94,6 +121,28 @@ const UPDATEABLE_COLUMNS: ReadonlyArray<{ column: string; type: ISqlType | (() =
   { column: 'Negocio_Fechado', type: mssql.Bit },
   { column: 'Kit', type: mssql.Bit },
   { column: 'Kit_Amount', type: mssql.Int },
+]
+
+// Hardcoded whitelist of dbo.Client columns the create + update endpoints may write.
+// Column names are constants (never user input), so building the INSERT/UPDATE clause
+// from this list is safe by construction — there is no injection surface. Keep the
+// keys in sync with ClientCreateInput and ClientUpdatePatch in types.ts.
+const UPDATEABLE_CLIENT_COLUMNS: ReadonlyArray<{
+  column: string
+  type: ISqlType | (() => ISqlType)
+}> = [
+  { column: 'no_PHC', type: mssql.Int },
+  { column: 'ID_Tp_Cliente', type: mssql.Int },
+  { column: 'nome', type: mssql.NVarChar },
+  { column: 'ncont', type: mssql.NVarChar },
+  { column: 'fax', type: mssql.NVarChar },
+  { column: 'telefone', type: mssql.NVarChar },
+  { column: 'contacto', type: mssql.NVarChar },
+  { column: 'morada', type: mssql.NVarChar },
+  { column: 'local', type: mssql.NVarChar },
+  { column: 'codpost', type: mssql.NVarChar },
+  { column: 'zona', type: mssql.NVarChar },
+  { column: 'Defense', type: mssql.Bit },
 ]
 
 // Caracterização fields locked once the order's month is closed (non-provisional only).
@@ -267,25 +316,25 @@ export async function fetchOrderSummaries(
   const where: string[] = []
 
   if (filters.dateFrom) {
-    where.push('DT_Order >= @dateFrom')
+    where.push('v.DT_Order >= @dateFrom')
     request.input('dateFrom', mssql.NVarChar, filters.dateFrom)
   }
   if (filters.dateTo) {
     // Half-open upper bound: an inclusive `dateTo` of "2025-09-12" must cover rows at
     // 2025-09-12 14:00. A bare `<=` on a datetime would drop them. DATEADD runs server-side.
-    where.push('DT_Order < DATEADD(day, 1, @dateTo)')
+    where.push('v.DT_Order < DATEADD(day, 1, @dateTo)')
     request.input('dateTo', mssql.NVarChar, filters.dateTo)
   }
   if (filters.clientName) {
-    where.push('nome LIKE @clientName')
+    where.push('v.nome LIKE @clientName')
     request.input('clientName', mssql.NVarChar, `%${filters.clientName}%`)
   }
   if (filters.orderFactory !== undefined) {
-    where.push('Order_Factory = @orderFactory')
+    where.push('v.Order_Factory = @orderFactory')
     request.input('orderFactory', mssql.Bit, filters.orderFactory)
   }
   if (filters.negocioFechado !== undefined) {
-    where.push('Negocio_Fechado = @negocioFechado')
+    where.push('v.Negocio_Fechado = @negocioFechado')
     request.input('negocioFechado', mssql.Bit, filters.negocioFechado)
   }
   // Categorical multi-select filters expand to parameterized `IN (@p0, @p1, …)`.
@@ -294,48 +343,56 @@ export async function fetchOrderSummaries(
   // limit of 2100 parameters per query — the frontend reference-data sets are far below
   // that (instrumentos is the largest at 70).
   if (filters.idTpOrder && filters.idTpOrder.length > 0) {
-    where.push(`ID_Tp_Order IN (${placeholders('idTpOrder', filters.idTpOrder.length)})`)
+    where.push(`v.ID_Tp_Order IN (${placeholders('idTpOrder', filters.idTpOrder.length)})`)
     filters.idTpOrder.forEach((value, index) => {
       request.input(`idTpOrder${index}`, mssql.NVarChar, value)
     })
   }
   if (filters.idArea && filters.idArea.length > 0) {
-    where.push(`ID_Area IN (${placeholders('idArea', filters.idArea.length)})`)
+    where.push(`v.ID_Area IN (${placeholders('idArea', filters.idArea.length)})`)
     filters.idArea.forEach((value, index) => {
       request.input(`idArea${index}`, mssql.NVarChar, value)
     })
   }
   if (filters.idTipo && filters.idTipo.length > 0) {
-    where.push(`ID_Tipo IN (${placeholders('idTipo', filters.idTipo.length)})`)
+    where.push(`v.ID_Tipo IN (${placeholders('idTipo', filters.idTipo.length)})`)
     filters.idTipo.forEach((value, index) => {
       request.input(`idTipo${index}`, mssql.NVarChar, value)
     })
   }
   if (filters.idProduto && filters.idProduto.length > 0) {
-    where.push(`ID_Produto IN (${placeholders('idProduto', filters.idProduto.length)})`)
+    where.push(`v.ID_Produto IN (${placeholders('idProduto', filters.idProduto.length)})`)
     filters.idProduto.forEach((value, index) => {
       request.input(`idProduto${index}`, mssql.Int, value)
     })
   }
   if (filters.idInstrumento && filters.idInstrumento.length > 0) {
-    where.push(`ID_Instrumento IN (${placeholders('idInstrumento', filters.idInstrumento.length)})`)
+    where.push(`v.ID_Instrumento IN (${placeholders('idInstrumento', filters.idInstrumento.length)})`)
     filters.idInstrumento.forEach((value, index) => {
       request.input(`idInstrumento${index}`, mssql.Int, value)
     })
   }
   if (filters.encomendaCliPHC) {
-    where.push('Encomenda_Cli_PHC LIKE @encomendaCliPHC')
+    where.push('v.Encomenda_Cli_PHC LIKE @encomendaCliPHC')
     request.input('encomendaCliPHC', mssql.NVarChar, `%${filters.encomendaCliPHC}%`)
   }
 
   request.input('limit', mssql.Int, limit)
+  // The view lacks the 7 Order-table-only columns the list grid now renders. LEFT JOIN
+  // the base [Order] table (keyed by ID_Order) so a row present in the view but missing
+  // from [Order] still resolves with those columns NULL rather than dropping the row —
+  // the view is the source of truth for which orders exist. Aliasing the view columns
+  // avoids ambiguous-column errors with the join.
   const sql = `SELECT TOP (@limit)
-    ID_Order, DT_Order, Order_Factory, ID_Tp_Order, ID_Client,
-    nome AS Client_Name, ID_Area, ID_Tipo, ID_Produto, ID_Instrumento,
-    Sell_Price, Negocio_Fechado, Encomenda_Cli_PHC, Provisoria
-  FROM [${ORDERS_SCHEMA}].[${ORDERS_VIEW}]
+    v.ID_Order, v.DT_Order, v.Order_Factory, v.ID_Tp_Order, v.ID_Client,
+    v.nome AS Client_Name, v.ID_Area, v.ID_Tipo, v.ID_Produto, v.ID_Instrumento,
+    v.Sell_Price, v.Negocio_Fechado, v.Encomenda_Cli_PHC, v.Provisoria,
+    o.Kit, o.ID_Tp_Warranty, o.Warranty_Reserve, o.Warranty_DT_Inicio,
+    o.Orc_Proposta, o.PO_Cliente, o.ID_Tp_Revenue
+  FROM [${ORDERS_SCHEMA}].[${ORDERS_VIEW}] AS v
+  LEFT JOIN [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o ON o.ID_Order = v.ID_Order
   ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-  ORDER BY DT_Order DESC, ID_Order DESC`
+  ORDER BY v.DT_Order DESC, v.ID_Order DESC`
 
   const result = await request.query<Record<string, unknown>>(sql)
   return Array.from(result.recordset).map(toSummaryRow)
@@ -372,6 +429,194 @@ export async function fetchOrderById(
   const result = await request.query<Record<string, unknown>>(sql)
   if (result.recordset.length === 0) return null
   return toDetailRow(result.recordset[0])
+}
+
+// Dashboard snapshot. Reads only from trusted DB-backed sources: dbo.[Order] for booked
+// orders + NOB, dbo.Reconhecimento for recognized revenue, and the verified
+// dbo.[11-Reconhecimento-PorReconhecer] view for the queue rows. KPI semantics:
+// - NOB YTD / Revenue Recognized YTD are true YTD measures: from 1 Jan of the
+//   snapshot year up to "today" (not the full civil year), filtered to Client
+//   orders only (`ID_Tp_Order = 'C'`).
+// - "Backlog at Period Start" is computed as:
+//   Σ Sell_Price of Client orders booked before the exercise start
+//   - Σ Valor_Reconhecimento of those same orders recognized before the exercise start
+//   where the exercise start is 1 Jan of the snapshot year.
+// - "Backlog to Recognize" is the roll-forward of that opening backlog:
+//     backlogAtPeriodStart + nobYtd - revenueRecognizedYtd
+//   which is equivalent to "all Client orders before today minus all Client
+//   recognitions before today". The endpoint is current-year only; callers do
+//   not choose the year.
+export async function fetchDashboardSnapshot(
+  pool: ConnectionPool,
+  today: Date = new Date(),
+): Promise<DashboardSnapshotRow> {
+  const year = today.getUTCFullYear()
+  const yearStart = new Date(Date.UTC(year, 0, 1))
+  const todayCutoff = today
+  const currentMonth = today.getUTCMonth() + 1
+
+  const kpisRequest = pool.request()
+  kpisRequest.input('yearStart', mssql.DateTime, yearStart)
+  kpisRequest.input('todayCutoff', mssql.DateTime, todayCutoff)
+  const kpisResult = await kpisRequest.query<Record<string, unknown>>(
+     `SELECT
+        (SELECT COUNT(*)
+         FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}]
+         WHERE DT_Order >= @yearStart AND DT_Order < @todayCutoff) AS ordersBookedYtd,
+        (SELECT COALESCE(SUM(COALESCE(Sell_Price, 0)), 0)
+         FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}]
+         WHERE DT_Order >= @yearStart AND DT_Order < @todayCutoff AND ID_Tp_Order = 'C') AS nobYtd,
+        (SELECT COALESCE(SUM(COALESCE(Valor_Reconhecimento, 0)), 0)
+         FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}] AS r
+         INNER JOIN [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o ON o.ID_Order = r.ID_Order
+         WHERE r.DT_Reconhecimento >= @yearStart AND r.DT_Reconhecimento < @todayCutoff AND o.ID_Tp_Order = 'C') AS revenueRecognizedYtd,
+        (
+          (
+            (SELECT COALESCE(SUM(COALESCE(o.Sell_Price, 0)), 0)
+             FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o
+             WHERE o.DT_Order < @yearStart AND o.ID_Tp_Order = 'C')
+            -
+            (SELECT COALESCE(SUM(COALESCE(r.Valor_Reconhecimento, 0)), 0)
+             FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}] AS r
+             INNER JOIN [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o ON o.ID_Order = r.ID_Order
+             WHERE o.DT_Order < @yearStart AND o.ID_Tp_Order = 'C' AND r.DT_Reconhecimento < @yearStart)
+          )
+          +
+          (SELECT COALESCE(SUM(COALESCE(o.Sell_Price, 0)), 0)
+           FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o
+           WHERE o.DT_Order >= @yearStart AND o.DT_Order < @todayCutoff AND o.ID_Tp_Order = 'C')
+          -
+          (SELECT COALESCE(SUM(COALESCE(r.Valor_Reconhecimento, 0)), 0)
+           FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}] AS r
+           INNER JOIN [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o ON o.ID_Order = r.ID_Order
+           WHERE r.DT_Reconhecimento >= @yearStart AND r.DT_Reconhecimento < @todayCutoff AND o.ID_Tp_Order = 'C')
+        ) AS backlogToRecognize,
+        (
+          (SELECT COALESCE(SUM(COALESCE(o.Sell_Price, 0)), 0)
+           FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o
+           WHERE o.DT_Order < @yearStart AND o.ID_Tp_Order = 'C')
+          -
+          (SELECT COALESCE(SUM(COALESCE(r.Valor_Reconhecimento, 0)), 0)
+           FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}] AS r
+           INNER JOIN [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o ON o.ID_Order = r.ID_Order
+           WHERE o.DT_Order < @yearStart AND o.ID_Tp_Order = 'C' AND r.DT_Reconhecimento < @yearStart)
+        ) AS backlogAtPeriodStart`,
+   )
+
+  const trendRequest = pool.request()
+  trendRequest.input('yearStart', mssql.DateTime, yearStart)
+  trendRequest.input('todayCutoff', mssql.DateTime, todayCutoff)
+  const trendResult = await trendRequest.query<Record<string, unknown>>(
+     `SELECT month_num, SUM(revenue) AS revenue, SUM(nob) AS nob
+      FROM (
+        SELECT MONTH(DT_Reconhecimento) AS month_num,
+               COALESCE(SUM(COALESCE(Valor_Reconhecimento, 0)), 0) AS revenue,
+               CAST(0 AS money) AS nob
+        FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
+        WHERE DT_Reconhecimento >= @yearStart AND DT_Reconhecimento < @todayCutoff
+        GROUP BY MONTH(DT_Reconhecimento)
+        UNION ALL
+        SELECT MONTH(DT_Order) AS month_num,
+               CAST(0 AS money) AS revenue,
+               COALESCE(SUM(COALESCE(Sell_Price, 0)), 0) AS nob
+        FROM [${ORDERS_SCHEMA}].[${ORDERS_TABLE}]
+        WHERE DT_Order >= @yearStart AND DT_Order < @todayCutoff
+        GROUP BY MONTH(DT_Order)
+      ) AS trend
+     GROUP BY month_num
+     ORDER BY month_num`,
+  )
+
+  const recognitionQueue = await fetchRecognitionQueue(pool)
+
+  const recentOrders = await fetchOrderSummaries(pool, {}, 5)
+
+  return {
+    year,
+    kpis: {
+      ordersBookedYtd: numberOrNull(kpisResult.recordset[0]?.ordersBookedYtd) ?? 0,
+      nobYtd: numberOrNull(kpisResult.recordset[0]?.nobYtd) ?? 0,
+      revenueRecognizedYtd: numberOrNull(kpisResult.recordset[0]?.revenueRecognizedYtd) ?? 0,
+      backlogToRecognize: numberOrNull(kpisResult.recordset[0]?.backlogToRecognize) ?? 0,
+      backlogAtPeriodStart: numberOrNull(kpisResult.recordset[0]?.backlogAtPeriodStart) ?? 0,
+    },
+    monthlyTrend: buildDashboardTrend(trendResult.recordset, year, currentMonth),
+    recognitionQueue,
+    recentOrders,
+  }
+}
+
+/**
+ * Reads every row from dbo.[11-Reconhecimento-PorReconhecer] with positive remaining
+ * value. Same column shape the dashboard queue card shows; exposed via a dedicated
+ * endpoint so the "View all" modal can render the full backlog (the snapshot only
+ * returns what fits on the dashboard card, even though that limit was removed — the
+ * endpoint still gives callers a focused query that skips KPIs/trend/recent orders).
+ */
+export async function fetchRecognitionQueue(
+  pool: ConnectionPool,
+): Promise<DashboardSnapshotRow['recognitionQueue']> {
+  const request = pool.request()
+  // The view doesn't expose dbo.[Order].ID_Order directly; LEFT JOIN the base Order
+  // table on the SAP ref so a queue row with no matching Order resolves with idOrder
+  // NULL rather than dropping the row. Aliasing the view's existing columns keeps the
+  // SELECT predictable.
+  const result = await request.query<Record<string, unknown>>(
+    `SELECT
+       o.ID_Order,
+       v.[Enc PHC] AS encPhc,
+       v.[Data Pedido] AS orderDate,
+       v.[Cliente] AS client,
+       v.[Area] AS area,
+       v.[Produto] AS product,
+       v.[Tipo] AS type,
+       v.[Preço de Venda] AS sellPrice,
+       v.[Valor Reconhecido] AS recognizedValue,
+       v.[Valor por Reconhecer] AS remainingValue,
+       v.[Facturado] AS invoiced
+     FROM [${ORDERS_SCHEMA}].[${RECOGNITION_BACKLOG_VIEW}] AS v
+     LEFT JOIN [${ORDERS_SCHEMA}].[${ORDERS_TABLE}] AS o ON o.Encomenda_Cli_PHC = v.[Enc PHC]
+     WHERE COALESCE(v.[Valor por Reconhecer], 0) > 0
+     ORDER BY v.[Data Pedido] DESC, v.[Valor por Reconhecer] DESC`,
+  )
+  return result.recordset.map(toDashboardRecognitionQueueRow)
+}
+
+function buildDashboardTrend(
+  rows: Record<string, unknown>[],
+  year: number,
+  currentMonth: number,
+): DashboardSnapshotRow['monthlyTrend'] {
+  const byMonth = new Map(
+    rows.map((row) => [numberOrNull(row.month_num) ?? 0, row] as const),
+  )
+  return Array.from({ length: currentMonth }, (_, index) => {
+    const month = index + 1
+    const row = byMonth.get(month)
+    return {
+      monthStart: new Date(Date.UTC(year, index, 1)).toISOString(),
+      revenue: numberOrNull(row?.revenue) ?? 0,
+      nob: numberOrNull(row?.nob) ?? 0,
+    }
+  })
+}
+
+// Queue rows come from a legacy view with spaces/accents in the column names. Alias them to
+// stable camelCase API fields here so the frontend never has to deal with bracketed SQL names.
+function toDashboardRecognitionQueueRow(row: Record<string, unknown>): DashboardRecognitionQueueRow {
+  return {
+    idOrder: numberOrNull(row.ID_Order),
+    encPhc: stringOrNull(row.encPhc),
+    orderDate: dateTimeOrNull(row.orderDate),
+    client: stringOrNull(row.client),
+    area: stringOrNull(row.area),
+    product: stringOrNull(row.product),
+    type: stringOrNull(row.type),
+    sellPrice: numberOrNull(row.sellPrice),
+    recognizedValue: numberOrNull(row.recognizedValue),
+    remainingValue: numberOrNull(row.remainingValue),
+    invoiced: booleanOrNull(row.invoiced),
+  }
 }
 
 // Applies a partial UPDATE to dbo.[Order]. The SET clause is built ONLY from columns in
@@ -471,6 +716,16 @@ export async function createOrder(
   input: OrderCreateInput,
   user: string,
 ): Promise<OrderDetailRow> {
+  // Defense-in-depth: the UI picker only offers existing clients, but the server rejects an
+  // unknown ID_Client before attempting the INSERT (the Order table has no FK constraint, so
+  // SQL Server would otherwise happily store a dangling client id).
+  const existsRequest = pool.request()
+  existsRequest.input('ID_Cliente', mssql.Int, input.ID_Client)
+  const exists = await existsRequest.query<{ '': unknown }>(
+    `SELECT TOP 1 1 FROM [${ORDERS_SCHEMA}].[${CLIENT_TABLE}] WHERE ID_Cliente = @ID_Cliente`,
+  )
+  if (!exists.recordset[0]) throw new ClientNotFoundError(input.ID_Client)
+
   const request = pool.request()
   request.input('DT_Order', mssql.DateTime, input.DT_Order)
   request.input('ID_Tp_Order', mssql.NVarChar, input.ID_Tp_Order)
@@ -579,6 +834,98 @@ export async function fetchClientById(
   return toClientDetailRow(result.recordset[0])
 }
 
+// Creates a row in dbo.Client. Required fields (nome, morada, local, codpost, no_PHC,
+// ncont, ID_Tp_Cliente) are inserted unconditionally; optional fields are inserted only
+// when present in the input. `ID_Cliente` is identity-assigned by SQL Server, so the
+// route re-reads via fetchClientById to return the full detail row. Returns the
+// created row (never null on success — the post-insert re-read is expected to find
+// the row we just wrote).
+export async function createClient(
+  pool: ConnectionPool,
+  input: ClientCreateInput,
+): Promise<ClientDetailRow> {
+  const request = pool.request()
+
+  const requiredColumns: Array<{ column: string; value: string | number | null }> = [
+    { column: 'nome', value: input.nome },
+    { column: 'morada', value: input.morada },
+    { column: 'local', value: input.local },
+    { column: 'codpost', value: input.codpost },
+    { column: 'no_PHC', value: input.no_PHC },
+    { column: 'ncont', value: input.ncont },
+    { column: 'ID_Tp_Cliente', value: input.ID_Tp_Cliente },
+  ]
+
+  const columns: string[] = []
+  const values: string[] = []
+  for (const { column, value } of requiredColumns) {
+    columns.push(column)
+    values.push(`@${column}`)
+    request.input(column, column === 'no_PHC' || column === 'ID_Tp_Cliente' ? mssql.Int : mssql.NVarChar, value)
+  }
+
+  const optionalByColumn: Record<string, string | null | undefined> = {
+    telefone: input.telefone,
+    contacto: input.contacto,
+    fax: input.fax,
+    zona: input.zona,
+  }
+  for (const [column, value] of Object.entries(optionalByColumn)) {
+    if (value === undefined || value === null || value === '') continue
+    columns.push(column)
+    values.push(`@${column}`)
+    request.input(column, mssql.NVarChar, value)
+  }
+
+  const result = await request.query<{ ID_Cliente: number }>(
+    `INSERT INTO [${ORDERS_SCHEMA}].[${CLIENT_TABLE}] (${columns.join(', ')})
+     OUTPUT INSERTED.ID_Cliente
+     VALUES (${values.join(', ')})`,
+  )
+  const id = result.recordset[0]?.ID_Cliente
+  if (!id) throw new Error('The database did not return the new client identifier.')
+  const created = await fetchClientById(pool, id)
+  if (!created) throw new Error('The new client could not be read after creation.')
+  return created
+}
+
+// Applies a partial UPDATE to dbo.Client. The SET clause is built ONLY from columns in
+// UPDATEABLE_CLIENT_COLUMNS that are present in `changes` — column names are constants,
+// never interpolated from input. The acting username is written to a per-row audit pair
+// is not present on dbo.Client (verified 2026-08-24), so only the data columns are
+// touched. Returns the re-read row, or null when the UPDATE affected 0 rows (the id was
+// not found). The route enforces who may call this; the db layer just persists what it
+// is given.
+export async function updateClient(
+  pool: ConnectionPool,
+  id: number,
+  changes: ClientUpdateChanges,
+): Promise<ClientDetailRow | null> {
+  const setClauses: string[] = []
+  const request = pool.request()
+  request.input('id', mssql.Int, id)
+
+  for (const { column, type } of UPDATEABLE_CLIENT_COLUMNS) {
+    if (column in changes) {
+      setClauses.push(`${column} = @${column}`)
+      request.input(column, type, (changes as Record<string, unknown>)[column])
+    }
+  }
+
+  if (setClauses.length === 0) {
+    // Nothing to change — return the current row so the route can respond 200.
+    return fetchClientById(pool, id)
+  }
+
+  const sql = `UPDATE [${ORDERS_SCHEMA}].[${CLIENT_TABLE}]
+    SET ${setClauses.join(', ')}
+    WHERE ID_Cliente = @id`
+
+  const result = await request.query(sql)
+  if (result.rowsAffected[0] === 0) return null
+  return fetchClientById(pool, id)
+}
+
 // Order sub-table reads. Both tables are read-only here (no writes). Rows are ordered by PK
 // ascending so the detail view is stable. `upsize_ts` is not selected (stripped at the SQL
 // layer rather than the mapper — there is no reason to ship the Buffer over the wire at all).
@@ -630,6 +977,187 @@ export async function fetchFacturacaoTypes(
   }))
 }
 
+// Recognition report — reads every row from the year/month crosstab view
+// `dbo.V_Reconhecimento_Monthly_Crosstab` and maps it to the camelCase wire
+// shape the UI expects. Filters are bound as parameters (never interpolated)
+// and the WHERE is built from the non-empty filters only; an empty `filters`
+// object returns every row the view produces (subject to `limit`).
+export interface RecognitionReportFilters {
+  yearRecognition?: number[]
+  area?: string[]
+  grpReport?: string[]
+  tipo?: string[]
+  produto?: string[]
+  encomendaCliPHC?: string[]
+}
+
+export async function fetchRecognitionReport(
+  pool: ConnectionPool,
+  filters: RecognitionReportFilters,
+  limit: number,
+): Promise<RecognitionReportRow[]> {
+  const request = pool.request()
+  const where: string[] = []
+
+  if (filters.yearRecognition && filters.yearRecognition.length > 0) {
+    where.push(
+      `v.Year_Recognition IN (${placeholders('yearRecognition', filters.yearRecognition.length)})`,
+    )
+    filters.yearRecognition.forEach((value, index) => {
+      request.input(`yearRecognition${index}`, mssql.Int, value)
+    })
+  }
+  if (filters.area && filters.area.length > 0) {
+    where.push(`v.Area IN (${placeholders('area', filters.area.length)})`)
+    filters.area.forEach((value, index) => {
+      request.input(`area${index}`, mssql.NVarChar, value)
+    })
+  }
+  if (filters.grpReport && filters.grpReport.length > 0) {
+    where.push(`v.Grp_Report IN (${placeholders('grpReport', filters.grpReport.length)})`)
+    filters.grpReport.forEach((value, index) => {
+      request.input(`grpReport${index}`, mssql.NVarChar, value)
+    })
+  }
+  if (filters.tipo && filters.tipo.length > 0) {
+    where.push(`v.Tipo IN (${placeholders('tipo', filters.tipo.length)})`)
+    filters.tipo.forEach((value, index) => {
+      request.input(`tipo${index}`, mssql.NVarChar, value)
+    })
+  }
+  if (filters.produto && filters.produto.length > 0) {
+    where.push(`v.Produto IN (${placeholders('produto', filters.produto.length)})`)
+    filters.produto.forEach((value, index) => {
+      request.input(`produto${index}`, mssql.NVarChar, value)
+    })
+  }
+  if (filters.encomendaCliPHC && filters.encomendaCliPHC.length > 0) {
+    where.push(
+      `v.Encomenda_Cli_PHC IN (${placeholders('encomendaCliPHC', filters.encomendaCliPHC.length)})`,
+    )
+    filters.encomendaCliPHC.forEach((value, index) => {
+      request.input(`encomendaCliPHC${index}`, mssql.NVarChar, value)
+    })
+  }
+
+  request.input('limit', mssql.Int, limit)
+  const result = await request.query<Record<string, unknown>>(
+    `SELECT TOP (@limit)
+       v.Year_Recognition,
+       v.Area,
+       v.Grp_Report,
+       v.Tipo,
+       v.Produto,
+       v.Encomenda_Cli_PHC,
+       v.Cliente,
+       v.Sell_Price,
+       v.Tp_Reconhecimento,
+       v.January, v.February, v.March, v.April, v.May, v.June,
+       v.July, v.August, v.September, v.October, v.November, v.December,
+       v.Total_Year
+     FROM [${ORDERS_SCHEMA}].[${RECOGNITION_MONTHLY_VIEW}] AS v
+     ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+     ORDER BY v.Year_Recognition DESC, v.Area ASC, v.Cliente ASC`,
+  )
+  return result.recordset.map(toRecognitionReportRow)
+}
+
+// Distinct values for every filterable dimension of the recognition report.
+// Powers the filter-bar dropdowns on the UI side; counts are intentionally
+// omitted because the only caller is the filter chip list.
+export async function fetchRecognitionReportOptions(
+  pool: ConnectionPool,
+): Promise<RecognitionReportOptions> {
+  const result = await pool.request().query<Record<string, unknown>>(
+    `SELECT DISTINCT
+       Year_Recognition,
+       Area,
+       Grp_Report,
+       Tipo,
+       Produto,
+       Encomenda_Cli_PHC
+     FROM [${ORDERS_SCHEMA}].[${RECOGNITION_MONTHLY_VIEW}]`,
+  )
+  const years = new Set<number>()
+  const areas = new Set<string>()
+  const grpReports = new Set<string>()
+  const tipos = new Set<string>()
+  const produtos = new Set<string>()
+  const encomendas = new Set<string>()
+  for (const row of result.recordset) {
+    const year = numberOrNull(row.Year_Recognition)
+    if (year != null) years.add(year)
+    const area = stringOrNull(row.Area)
+    if (area) areas.add(area)
+    const grp = stringOrNull(row.Grp_Report)
+    if (grp) grpReports.add(grp)
+    const tipo = stringOrNull(row.Tipo)
+    if (tipo) tipos.add(tipo)
+    const produto = stringOrNull(row.Produto)
+    if (produto) produtos.add(produto)
+    const enc = stringOrNull(row.Encomenda_Cli_PHC)
+    if (enc) encomendas.add(enc)
+  }
+  return {
+    years: Array.from(years).sort((a, b) => b - a),
+    areas: Array.from(areas).sort(),
+    grpReports: Array.from(grpReports).sort(),
+    tipos: Array.from(tipos).sort(),
+    produtos: Array.from(produtos).sort(),
+    encomendas: Array.from(encomendas).sort(),
+  }
+}
+
+// Reference cascade: Área → Produto → Instrumento. The three tables are small and static, so the
+// endpoints read them unpaginated. `fetchProdutos`/`fetchInstrumentos` accept an optional parent
+// id to narrow the cascade; omitting it returns every row (used by the filters, which are not
+// cascaded). Verified 2026-08-25 against BRKR_ERP (Produto.ID_Area, Instrumento.ID_Produto).
+export async function fetchAreas(pool: ConnectionPool): Promise<AreaRow[]> {
+  const result = await pool.request().query<Record<string, unknown>>(
+    `SELECT ID_Area, Area FROM [${ORDERS_SCHEMA}].[Area] ORDER BY ID_Area ASC`,
+  )
+  return result.recordset.map((row) => ({
+    id: stringOrNull(row.ID_Area) ?? '',
+    label: stringOrNull(row.Area) ?? '',
+  }))
+}
+
+export async function fetchProdutos(
+  pool: ConnectionPool,
+  area?: string,
+): Promise<ProdutoRow[]> {
+  const request = pool.request()
+  const where = area ? 'WHERE ID_Area = @area' : ''
+  if (area) request.input('area', mssql.NVarChar, area)
+  const result = await request.query<Record<string, unknown>>(
+    `SELECT ID_Produto, ID_Area, Produto FROM [${ORDERS_SCHEMA}].[Produto] ${where}
+     ORDER BY ID_Produto ASC`,
+  )
+  return result.recordset.map((row) => ({
+    id: numberOrNull(row.ID_Produto) ?? 0,
+    label: stringOrNull(row.Produto) ?? '',
+    area: stringOrNull(row.ID_Area),
+  }))
+}
+
+export async function fetchInstrumentos(
+  pool: ConnectionPool,
+  produto?: number,
+): Promise<InstrumentoRow[]> {
+  const request = pool.request()
+  const where = produto ? 'WHERE ID_Produto = @produto' : ''
+  if (produto) request.input('produto', mssql.Int, produto)
+  const result = await request.query<Record<string, unknown>>(
+    `SELECT ID_Instrumento, ID_Produto, Instrumento FROM [${ORDERS_SCHEMA}].[Instrumento] ${where}
+     ORDER BY ID_Instrumento ASC`,
+  )
+  return result.recordset.map((row) => ({
+    id: numberOrNull(row.ID_Instrumento) ?? 0,
+    label: stringOrNull(row.Instrumento) ?? '',
+    produto: numberOrNull(row.ID_Produto),
+  }))
+}
+
 export class RecognitionCapacityError extends Error {
   constructor(message: string) {
     super(message)
@@ -655,6 +1183,17 @@ export class DatabaseRowNotFoundError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'DatabaseRowNotFoundError'
+  }
+}
+
+// Thrown when a create request references a client id that does not exist in dbo.Client.
+// Defense-in-depth: the UI picker only offers clients from the list, but the server rejects
+// unknown ids regardless. Mapped to a 400 validation response — it is a caller input error,
+// not a missing resource the caller already holds.
+export class ClientNotFoundError extends Error {
+  constructor(id: number) {
+    super(`Client ${id} does not exist.`)
+    this.name = 'ClientNotFoundError'
   }
 }
 
@@ -784,6 +1323,99 @@ export async function deleteReconhecimento(pool: ConnectionPool, id: number): Pr
   const result = await request.query(
     `DELETE FROM [${ORDERS_SCHEMA}].[${RECONHECIMENTO_TABLE}]
      WHERE ID_Reconhecimento = @id`,
+  )
+  return (result.rowsAffected[0] ?? 0) > 0
+}
+
+// Kit_Consumables sub-table CRUD. Unlike Reconhecimento there is no per-row capacity
+// constraint (the Saldo = Kit_Amount − Σ Total_Price is a display-only figure), so the
+// mutations are plain INSERT/UPDATE/DELETE without the lock-and-capacity transaction.
+// Hard delete mirrors Reconhecimento — dbo.Kit_Consumables has no deleted_at column.
+export async function fetchKitConsumables(
+  pool: ConnectionPool,
+  orderId: number,
+): Promise<KitConsumableRow[]> {
+  const request = pool.request()
+  request.input('orderId', mssql.Int, orderId)
+  const sql = `SELECT
+    ID_Kit, ID_Order, Date, Internal_Order, Material, Description,
+    Quant, Unit_Price, Total_Price
+  FROM [${ORDERS_SCHEMA}].[${KIT_CONSUMABLES_TABLE}]
+  WHERE ID_Order = @orderId
+  ORDER BY ID_Kit ASC`
+
+  const result = await request.query<Record<string, unknown>>(sql)
+  return Array.from(result.recordset).map(toKitConsumableRow)
+}
+
+export async function addKitConsumable(
+  pool: ConnectionPool,
+  input: NewKitConsumableInput,
+): Promise<KitConsumableRow> {
+  const request = pool.request()
+  request.input('orderId', mssql.Int, input.ID_Order)
+  request.input('date', mssql.DateTime, input.Date)
+  request.input('internalOrder', mssql.NVarChar, input.Internal_Order)
+  request.input('material', mssql.NVarChar, input.Material)
+  request.input('description', mssql.NVarChar, input.Description)
+  request.input('quant', mssql.Int, input.Quant)
+  request.input('unitPrice', mssql.Money, input.Unit_Price)
+  request.input('totalPrice', mssql.Money, input.Total_Price)
+  const inserted = await request.query<Record<string, unknown>>(
+    `INSERT INTO [${ORDERS_SCHEMA}].[${KIT_CONSUMABLES_TABLE}]
+      (ID_Order, Date, Internal_Order, Material, Description, Quant, Unit_Price, Total_Price)
+     OUTPUT INSERTED.ID_Kit, INSERTED.ID_Order, INSERTED.Date,
+            INSERTED.Internal_Order, INSERTED.Material, INSERTED.Description,
+            INSERTED.Quant, INSERTED.Unit_Price, INSERTED.Total_Price
+     VALUES (@orderId, @date, @internalOrder, @material, @description, @quant, @unitPrice, @totalPrice)`,
+  )
+  const row = inserted.recordset[0]
+  if (!row) throw new Error('The database did not return the kit consumable row.')
+  return toKitConsumableRow(row)
+}
+
+export async function updateKitConsumable(
+  pool: ConnectionPool,
+  id: number,
+  patch: KitConsumablePatch,
+): Promise<KitConsumableRow | null> {
+  const request = pool.request()
+  request.input('id', mssql.Int, id)
+  const setClauses: string[] = []
+  for (const { column, type: sqlType } of KIT_CONSUMABLES_UPDATEABLE_COLUMNS) {
+    if (column in patch) {
+      setClauses.push(`${column} = @${column}`)
+      request.input(column, sqlType, patch[column])
+    }
+  }
+  if (setClauses.length === 0) {
+    // Nothing to change — return the current row so the route can respond 200.
+    const current = await request.query<Record<string, unknown>>(
+      `SELECT ID_Kit, ID_Order, Date, Internal_Order, Material, Description,
+              Quant, Unit_Price, Total_Price
+       FROM [${ORDERS_SCHEMA}].[${KIT_CONSUMABLES_TABLE}]
+       WHERE ID_Kit = @id`,
+    )
+    return current.recordset[0] ? toKitConsumableRow(current.recordset[0]) : null
+  }
+  const updated = await request.query<Record<string, unknown>>(
+    `UPDATE [${ORDERS_SCHEMA}].[${KIT_CONSUMABLES_TABLE}]
+     SET ${setClauses.join(', ')}
+     OUTPUT INSERTED.ID_Kit, INSERTED.ID_Order, INSERTED.Date,
+            INSERTED.Internal_Order, INSERTED.Material, INSERTED.Description,
+            INSERTED.Quant, INSERTED.Unit_Price, INSERTED.Total_Price
+     WHERE ID_Kit = @id`,
+  )
+  const row = updated.recordset[0]
+  return row ? toKitConsumableRow(row) : null
+}
+
+export async function deleteKitConsumable(pool: ConnectionPool, id: number): Promise<boolean> {
+  const request = pool.request()
+  request.input('id', mssql.Int, id)
+  const result = await request.query(
+    `DELETE FROM [${ORDERS_SCHEMA}].[${KIT_CONSUMABLES_TABLE}]
+     WHERE ID_Kit = @id`,
   )
   return (result.rowsAffected[0] ?? 0) > 0
 }
@@ -1167,17 +1799,29 @@ function planPropagationLines(
   }
   const sellPrice = numberOrNull(order.Sell_Price)
   const start = dateOrNull(input.startDate)
-  if (sellPrice === null || sellPrice <= 0 || start === null) {
-    throw new PropagationValidationError('Sell Price e início do contrato são obrigatórios.')
+  const recognitionDate = dateOrNull(input.recognitionDate)
+  if (
+    sellPrice === null ||
+    sellPrice <= 0 ||
+    start === null ||
+    recognitionDate === null
+  ) {
+    throw new PropagationValidationError(
+      'Sell Price, início do contrato e data de reconhecimento são obrigatórios.',
+    )
   }
   const months = input.years * 12
   const values = allocateMoney(sellPrice, months)
-  const first = firstUtcMonth(start)
-  return values.map((value, index) => ({
-    type: 'CM',
-    date: addUtcMonths(first, index),
-    value,
-  }))
+  const contractStart = firstUtcMonth(start)
+  const recognitionMonth = firstUtcMonth(recognitionDate)
+  return values.map((value, index) => {
+    const scheduled = addUtcMonths(contractStart, index)
+    return {
+      type: 'CM',
+      date: scheduled.getTime() < recognitionMonth.getTime() ? recognitionMonth : scheduled,
+      value,
+    }
+  })
 }
 
 function allocateMoney(total: number, count: number): number[] {
@@ -1275,6 +1919,15 @@ function toSummaryRow(row: Record<string, unknown>): OrderSummaryRow {
     Sell_Price: numberOrNull(row['Sell_Price']),
     Negocio_Fechado: booleanOrNull(row['Negocio_Fechado']),
     Encomenda_Cli_PHC: stringOrNull(row['Encomenda_Cli_PHC']),
+    // Order-table-only columns joined from dbo.[Order]. When the LEFT JOIN found no base
+    // row these come back null and render as "—" — they never break the list.
+    Kit: booleanOrNull(row['Kit']),
+    ID_Tp_Warranty: numberOrNull(row['ID_Tp_Warranty']),
+    Warranty_Reserve: numberOrNull(row['Warranty_Reserve']),
+    Warranty_DT_Inicio: dateTimeOrNull(row['Warranty_DT_Inicio']),
+    Orc_Proposta: stringOrNull(row['Orc_Proposta']),
+    PO_Cliente: stringOrNull(row['PO_Cliente']),
+    ID_Tp_Revenue: numberOrNull(row['ID_Tp_Revenue']),
     Provisoria: booleanOrNull(row['Provisoria']),
   }
 }
@@ -1350,10 +2003,51 @@ function toFacturacaoRow(row: Record<string, unknown>): DocumentoFaturacaoRow {
   }
 }
 
+function toKitConsumableRow(row: Record<string, unknown>): KitConsumableRow {
+  return {
+    ID_Kit: numberOrThrow(row, 'ID_Kit'),
+    ID_Order: numberOrThrow(row, 'ID_Order'),
+    Date: dateTimeOrNull(row['Date']),
+    Internal_Order: stringOrNull(row['Internal_Order']),
+    Material: stringOrNull(row['Material']),
+    Description: stringOrNull(row['Description']),
+    Quant: numberOrNull(row['Quant']),
+    Unit_Price: numberOrNull(row['Unit_Price']),
+    Total_Price: numberOrNull(row['Total_Price']),
+  }
+}
+
 // Builds "@name0, @name1, …" for a parameterized IN clause. The column name is a hardcoded
 // constant (never user input), so only the parameter count is dynamic.
 function placeholders(name: string, count: number): string {
   return Array.from({ length: count }, (_, index) => `@${name}${index}`).join(', ')
+}
+
+function toRecognitionReportRow(row: Record<string, unknown>): RecognitionReportRow {
+  return {
+    yearRecognition: numberOrNull(row.Year_Recognition),
+    area: stringOrNull(row.Area),
+    grpReport: stringOrNull(row.Grp_Report),
+    tipo: stringOrNull(row.Tipo),
+    produto: stringOrNull(row.Produto),
+    encomendaCliPHC: stringOrNull(row.Encomenda_Cli_PHC),
+    cliente: stringOrNull(row.Cliente),
+    sellPrice: numberOrNull(row.Sell_Price),
+    tpReconhecimento: stringOrNull(row.Tp_Reconhecimento),
+    january: numberOrNull(row.January) ?? 0,
+    february: numberOrNull(row.February) ?? 0,
+    march: numberOrNull(row.March) ?? 0,
+    april: numberOrNull(row.April) ?? 0,
+    may: numberOrNull(row.May) ?? 0,
+    june: numberOrNull(row.June) ?? 0,
+    july: numberOrNull(row.July) ?? 0,
+    august: numberOrNull(row.August) ?? 0,
+    september: numberOrNull(row.September) ?? 0,
+    october: numberOrNull(row.October) ?? 0,
+    november: numberOrNull(row.November) ?? 0,
+    december: numberOrNull(row.December) ?? 0,
+    totalYear: numberOrNull(row.Total_Year) ?? 0,
+  }
 }
 
 // mssql returns booleans for `bit` columns, numbers for `int`/`money`, and JS Date

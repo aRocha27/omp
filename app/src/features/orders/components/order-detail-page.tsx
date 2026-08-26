@@ -8,6 +8,7 @@ import {
   FileText,
   Lock,
   Mail,
+  Package,
   Pencil,
   Plus,
   Receipt,
@@ -17,6 +18,7 @@ import {
   Sparkles,
   TrendingUp,
   Trash2,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -32,8 +34,17 @@ import { useDeleteReconhecimento } from '@/features/orders/api/use-delete-reconh
 import { usePropagateReconhecimento } from '@/features/orders/api/use-propagate-reconhecimento'
 import { useUpdateDocumentoFaturacao } from '@/features/orders/api/use-update-documento-faturacao'
 import { useDeleteDocumentoFaturacao } from '@/features/orders/api/use-delete-documento-faturacao'
+import {
+  useAddKitConsumable,
+  useDeleteKitConsumable,
+  useKitConsumables,
+  useUpdateKitConsumable,
+} from '@/features/orders/api/use-kit-consumables'
 import { useCurrentUser, useRoleSwitcher } from '@/app/providers/user-provider'
 import { useRepositories } from '@/app/providers/repository-provider'
+import { useAreas } from '@/features/orders/api/use-areas'
+import { useProdutos } from '@/features/orders/api/use-produtos'
+import { useInstrumentos } from '@/features/orders/api/use-instrumentos'
 import { resolveClientName } from '@/fixtures/orders'
 import { formatOrderDate, formatPrice } from '@/utils/format'
 import { recognitionTotals, reconhecimentoEstado } from '@/domain/rules/recognition'
@@ -42,10 +53,13 @@ import type { Order } from '@/domain/models/order'
 import type { OrderUpdatePatch } from '@/services/contracts/orders.repository'
 import type { RoleLike } from '@/domain/models/user'
 import type { Reconhecimento } from '@/domain/models/reconhecimento'
+import type { KitConsumable } from '@/domain/models/kit-consumable'
 import type { DocumentoFaturacao } from '@/domain/models/documento-faturacao'
 import type { DocumentoFaturacaoType } from '@/services/contracts/documento-faturacao.repository'
 import {
+  canAddFinancial,
   canEditField,
+  canEditFinancial,
   isHistorico,
   orderEstado,
   type OrderEstado,
@@ -59,6 +73,7 @@ import {
   tipos,
   tpReconhecimentos,
   warrantyTypes,
+  WARRANTY_RECONHECIMENTO_CODES,
   type ReferenceOption,
 } from '@/fixtures/reference-data'
 import { reconhecimentoLabel } from '@/features/orders/components/reference-labels'
@@ -69,6 +84,9 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Tabs, type TabItem } from '@/components/ui/tabs'
 import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
+import { DatePicker } from '@/components/ui/date-picker'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 /** Em-dash fallback for any null/empty display value. */
 const DASH = '—'
@@ -81,7 +99,7 @@ function displayText(v: string | null | undefined): string {
 /* Editable field definitions                                                  */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-type FieldKind = 'text' | 'number' | 'date' | 'select-str' | 'select-num'
+type FieldKind = 'text' | 'number' | 'date' | 'select-str' | 'select-num' | 'boolean'
 
 interface FieldDef {
   key: keyof OrderUpdatePatch
@@ -92,16 +110,16 @@ interface FieldDef {
 
 /** Caracterização block — the order-classification fields locked after month close. */
 const CARACTERIZACAO_FIELDS: readonly FieldDef[] = [
-  { key: 'DT_Order', label: 'Data do Pedido', kind: 'date' },
-  { key: 'ID_Tp_Order', label: 'Tipo de Pedido', kind: 'select-str', options: orderTypes },
-  { key: 'ID_Client', label: 'Cliente', kind: 'number' },
-  { key: 'ID_Area', label: 'Área', kind: 'select-str', options: areas },
-  { key: 'ID_Tipo', label: 'Tipo', kind: 'select-str', options: tipos },
-  { key: 'ID_Produto', label: 'Produto', kind: 'select-num', options: produtos },
-  { key: 'ID_Instrumento', label: 'Instrumento', kind: 'select-num', options: instrumentos },
-  { key: 'ID_Tp_Warranty', label: 'Garantia', kind: 'select-num', options: warrantyTypes },
-  { key: 'Warranty_DT_Inicio', label: 'Início Garantia', kind: 'date' },
-  { key: 'ID_Tp_Revenue', label: 'Tipo Revenue', kind: 'select-num', options: revenueTypes },
+  { key: 'DT_Order', label: 'Order Date', kind: 'date' },
+  { key: 'ID_Tp_Order', label: 'Order Type', kind: 'select-str', options: orderTypes },
+  { key: 'ID_Client', label: 'Client', kind: 'number' },
+  { key: 'ID_Area', label: 'Area', kind: 'select-str', options: areas },
+  { key: 'ID_Tipo', label: 'Kind', kind: 'select-str', options: tipos },
+  { key: 'ID_Produto', label: 'Product', kind: 'select-num', options: produtos },
+  { key: 'ID_Instrumento', label: 'Instrument', kind: 'select-num', options: instrumentos },
+  { key: 'ID_Tp_Warranty', label: 'Warranty', kind: 'select-num', options: warrantyTypes },
+  { key: 'Warranty_DT_Inicio', label: 'Warranty Start', kind: 'date' },
+  { key: 'ID_Tp_Revenue', label: 'Revenue Type', kind: 'select-num', options: revenueTypes },
 ]
 
 /** Revenue tab — the financial values that drive recognition math. */
@@ -110,19 +128,29 @@ const REVENUE_FIELDS: readonly FieldDef[] = [
   { key: 'Warranty_Reserve', label: 'Warranty Reserve', kind: 'number' },
 ]
 
-/** Faturação tab — editable commercial references. */
+/** Invoicing tab — editable commercial references. */
 const FATURACAO_FIELDS: readonly FieldDef[] = [
-  { key: 'Orc_Proposta', label: 'Orçamento/Proposta', kind: 'text' },
-  { key: 'PO_Cliente', label: 'Pedido do Cliente', kind: 'text' },
+  { key: 'Orc_Proposta', label: 'Quote / Proposal', kind: 'text' },
+  { key: 'PO_Cliente', label: 'Customer PO', kind: 'text' },
+]
+
+/** Kit block — the order's kit flag and budget. Not part of the month-locked
+ *  caracterização set, so always editable for editor/admin. `Kit_Amount` is
+ *  rendered in the Kit tab alongside the Balance and the Kit_Consumables sub-table;
+ *  `Kit` is the caracterização checkbox that gates the tab's visibility. */
+const KIT_FIELDS: readonly FieldDef[] = [
+  { key: 'Kit', label: 'Kit', kind: 'boolean' },
+  { key: 'Kit_Amount', label: 'Kit Amount', kind: 'number' },
 ]
 
 /** Every field the edit draft tracks. Obs is rendered as a textarea but kept in
- *  the same draft so [Guardar] saves it in one round-trip. */
+ *  the same draft so [Save] saves it in one round-trip. */
 const ALL_EDITABLE_FIELDS: readonly FieldDef[] = [
   ...CARACTERIZACAO_FIELDS,
   ...REVENUE_FIELDS,
   ...FATURACAO_FIELDS,
-  { key: 'Obs', label: 'Observações', kind: 'text' },
+  ...KIT_FIELDS,
+  { key: 'Obs', label: 'Notes', kind: 'text' },
 ]
 
 /** Draft values are stored as strings (form inputs are strings); parsed back to
@@ -138,12 +166,35 @@ function optionLabel(
   return match ? match.label : null
 }
 
+/**
+ * Merge a parent-filtered option list with the currently-held child value.
+ *
+ * The cascade dropdowns show only the parent's children, but a legacy order may hold
+ * a child id that no longer matches its parent (data drift). To avoid silently hiding
+ * the saved value from the dropdown, the held id is prepended (from the full fixture
+ * list) when it isn't already in the filtered set. New picks stay constrained to the
+ * filtered children; the preserved row lets the editor see/keep the existing value.
+ */
+function mergeSaved<T extends ReferenceOption>(
+  filtered: readonly T[] | undefined,
+  heldId: string | number | null | undefined,
+  full: readonly T[],
+): T[] {
+  const list = filtered ? [...filtered] : []
+  if (heldId != null && heldId !== '' && !list.some((o) => String(o.id) === String(heldId))) {
+    const held = full.find((o) => String(o.id) === String(heldId))
+    if (held) list.unshift(held)
+  }
+  return list
+}
+
 /** Seed the draft from the order so each input shows its current value. */
 function seedDraft(order: Order): Draft {
   const draft: Draft = {}
   for (const def of ALL_EDITABLE_FIELDS) {
     const v = order[def.key]
-    if (def.kind === 'date') draft[def.key] = v ? String(v).slice(0, 10) : ''
+    if (def.kind === 'boolean') draft[def.key] = v === true ? 'true' : 'false'
+    else if (def.kind === 'date') draft[def.key] = v ? String(v).slice(0, 10) : ''
     else draft[def.key] = v == null ? '' : String(v)
   }
   return draft
@@ -151,6 +202,7 @@ function seedDraft(order: Order): Draft {
 
 /** Parse a raw draft string back to the field's wire type. */
 function parseValue(def: FieldDef, raw: string): unknown {
+  if (def.kind === 'boolean') return raw === 'true'
   if (raw === '') return null
   if (def.kind === 'number' || def.kind === 'select-num') {
     const n = Number(raw)
@@ -178,11 +230,27 @@ function buildPatch(draft: Draft, order: Order): OrderUpdatePatch {
 /* Header badges                                                               */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/** Derived invoicing status from the net invoiced total vs Sell Price.
+ *  - net == Sell Price (within money epsilon) → Fully Invoiced
+ *  - net > 0 (but below Sell Price)           → Partially Invoiced
+ *  - net <= 0                                  → Not Invoiced
+ *  The order-level `Facturado` flag is server-set; this is the display truth. */
+export function invoicingStatus(
+  netInvoiced: number,
+  sellPrice: number | null | undefined,
+): { tone: 'success' | 'warning' | 'neutral'; label: string } {
+  if (sellPrice != null && sellPrice > 0 && Math.abs(netInvoiced - sellPrice) <= 0.005) {
+    return { tone: 'success', label: 'Fully Invoiced' }
+  }
+  if (netInvoiced > 0) return { tone: 'warning', label: 'Partially Invoiced' }
+  return { tone: 'neutral', label: 'Not Invoiced' }
+}
+
 function EstadoBadge({ estado }: { estado: OrderEstado }) {
   const map: Record<OrderEstado, { tone: 'neutral' | 'success' | 'warning'; label: string }> = {
-    provisorio: { tone: 'warning', label: 'Provisório' },
-    historico: { tone: 'neutral', label: 'Histórico' },
-    atual: { tone: 'success', label: 'Atual' },
+    provisorio: { tone: 'warning', label: 'Provisional' },
+    historico: { tone: 'neutral', label: 'Historical' },
+    current: { tone: 'success', label: 'Current' },
   }
   const { tone, label } = map[estado]
   return <Badge tone={tone}>{label}</Badge>
@@ -290,13 +358,18 @@ function SectionCard({
 /** The view-mode display value for a field. */
 function viewValue(def: FieldDef, order: Order): ReactNode {
   const v = order[def.key]
+  if (def.kind === 'boolean') return v === true ? 'Yes' : 'No'
   if (def.kind === 'select-str' || def.kind === 'select-num') {
     return displayText(optionLabel(def.options!, v as string | number | null))
   }
   if (def.key === 'ID_Client') {
     return displayText(order.Client_Name ?? resolveClientName(order.ID_Client))
   }
-  if (def.key === 'Sell_Price' || def.key === 'Warranty_Reserve') {
+  if (
+    def.key === 'Sell_Price' ||
+    def.key === 'Warranty_Reserve' ||
+    def.key === 'Kit_Amount'
+  ) {
     return formatPrice(v as number | null)
   }
   if (def.kind === 'date') return formatOrderDate(v as string | null)
@@ -309,11 +382,15 @@ function FieldControl({
   value,
   disabled,
   onChange,
+  optionsOverride,
 }: {
   def: FieldDef
   value: string
   disabled: boolean
   onChange: (v: string) => void
+  // When set, the select renders these options instead of `def.options` — used by
+  // the Área/Produto/Instrumento cascade to show only the parent-filtered children.
+  optionsOverride?: readonly ReferenceOption[]
 }) {
   const common = {
     value,
@@ -322,11 +399,22 @@ function FieldControl({
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       onChange(e.target.value),
   }
+  if (def.kind === 'boolean') {
+    return (
+      <Checkbox
+        checked={value === 'true'}
+        disabled={disabled}
+        aria-label={def.label}
+        onChange={(e) => onChange(e.target.checked ? 'true' : 'false')}
+      />
+    )
+  }
   if (def.kind === 'select-str' || def.kind === 'select-num') {
+    const options = optionsOverride ?? def.options!
     return (
       <Select {...common}>
         <option value="">—</option>
-        {def.options!.map((o) => (
+        {options.map((o) => (
           <option key={String(o.id)} value={String(o.id)}>
             {o.label}
           </option>
@@ -335,7 +423,17 @@ function FieldControl({
     )
   }
   if (def.kind === 'number') return <Input type="number" {...common} />
-  if (def.kind === 'date') return <Input type="date" {...common} />
+  if (def.kind === 'date') {
+    const dateValue = typeof value === 'string' && value ? value : null
+    return (
+      <DatePicker
+        aria-label={def.label}
+        value={dateValue}
+        disabled={disabled}
+        onChange={(next) => onChange(next ?? '')}
+      />
+    )
+  }
   return <Input type="text" {...common} />
 }
 
@@ -345,7 +443,7 @@ function LockIcon() {
   return (
     <Lock
       className="size-3 shrink-0 text-foreground/40"
-      aria-label="Campo bloqueado (mês fechado)"
+      aria-label="Field locked (month closed)"
     />
   )
 }
@@ -358,6 +456,7 @@ function CaracterizacaoRow({
   role,
   value,
   onChange,
+  optionsOverride,
 }: {
   def: FieldDef
   order: Order
@@ -365,6 +464,7 @@ function CaracterizacaoRow({
   role: RoleLike
   value: string
   onChange: (v: string) => void
+  optionsOverride?: readonly ReferenceOption[]
 }) {
   const locked = editing && !canEditField(order, def.key, role)
   return (
@@ -375,7 +475,13 @@ function CaracterizacaoRow({
       </dt>
       <dd className="min-w-0 text-[11px] text-foreground">
         {editing ? (
-          <FieldControl def={def} value={value} disabled={locked} onChange={onChange} />
+          <FieldControl
+            def={def}
+            value={value}
+            disabled={locked}
+            onChange={onChange}
+            optionsOverride={optionsOverride}
+          />
         ) : (
           viewValue(def, order)
         )}
@@ -517,6 +623,15 @@ function ReconhecimentosSection({
   const orderId = order.ID_Order
   const sellPrice = order.Sell_Price
   const warrantyReserve = order.Tipo_Warranty === true ? order.Warranty_Reserve : 0
+  // Warranty recognition types (W/WP) are only selectable when the order's kind
+  // carries warranty (Tipo_Warranty). When Warranty=0 the warranty bucket capacity
+  // is zero server-side, so the option is hidden here to prevent dead-end entries.
+  const availableReconhecimentoTypes =
+    order.Tipo_Warranty === true
+      ? tpReconhecimentos
+      : tpReconhecimentos.filter(
+          (o) => !WARRANTY_RECONHECIMENTO_CODES.includes(String(o.id)),
+        )
   const { reconhecimentos } = useRepositories()
   const queryClient = useQueryClient()
   const user = useCurrentUser()
@@ -541,10 +656,35 @@ function ReconhecimentosSection({
   const [contractOpen, setContractOpen] = useState(false)
   const [contractForm, setContractForm] = useState({
     startDate: new Date().toISOString().slice(0, 10),
+    recognitionDate: new Date().toISOString().slice(0, 10),
     years: '1',
   })
 
+  // Pending propagation awaiting in-app confirmation. The native `window.confirm`
+  // was replaced by `ConfirmDialog` because the browser exposes a "Prevent this
+  // page from creating additional dialogs" checkbox that silently suppresses
+  // every future confirmation — so the Propagate button appeared to do nothing
+  // (the mutation was never fired). The in-app dialog asks fresh every time.
+  type PropagateConfirm =
+    | { kind: 'warranty'; description: string }
+    | {
+        kind: 'maintenance'
+        description: string
+        startDate: string
+        years: number
+        recognitionDate: string
+      }
+  const [propagateConfirm, setPropagateConfirm] = useState<PropagateConfirm | null>(null)
+
   const canAdd = role !== 'viewer'
+  // Add (and the inline add form) is always open for any non-viewer — the user
+  // explicitly asked that adding recognitions stays available even after the
+  // order's month has closed. Only editing/deleting existing rows is gated.
+  const canAddRow = canAddFinancial(role)
+  // Editing/deleting existing rows: editor/user can do it while the order's
+  // month is current or future; admin always; viewer never. Provisional orders
+  // stay fully editable (handled inside canEditFinancial via isHistorico).
+  const canEditRow = canEditFinancial(order, role)
 
   /** Remaining capacity in a recognition bucket, optionally excluding one row
    *  (the row being edited). Warranty codes W/WP draw from the Warranty_Reserve
@@ -571,7 +711,7 @@ function ReconhecimentosSection({
     const value = Number(form.value)
     if (!Number.isFinite(value) || value <= 0 || value > capacity + 0.0001) {
       setError(
-        `Valor inválido. Disponível: ${formatPrice(capacity)}. O total reconhecido não pode ultrapassar o Sell Price.`,
+        `Invalid value. Available: ${formatPrice(capacity)}. Total recognised cannot exceed the Sell Price.`,
       )
       return
     }
@@ -603,7 +743,7 @@ function ReconhecimentosSection({
       setForm({ type: 'P', date: new Date().toISOString().slice(0, 10), value: '' })
     } catch (reason) {
       setError(
-        reason instanceof Error ? reason.message : 'Não foi possível adicionar o reconhecimento.',
+        reason instanceof Error ? reason.message : 'Could not add the recognition.',
       )
     } finally {
       setSaving(false)
@@ -625,7 +765,7 @@ function ReconhecimentosSection({
     const cap = bucketCapacity(editForm.type, r.ID_Reconhecimento)
     if (!Number.isFinite(value) || value <= 0 || value > cap + 0.0001) {
       setError(
-        `Valor inválido. Disponível: ${formatPrice(cap)}. O total reconhecido não pode ultrapassar o Sell Price.`,
+        `Invalid value. Available: ${formatPrice(cap)}. Total recognised cannot exceed the Sell Price.`,
       )
       return
     }
@@ -641,19 +781,17 @@ function ReconhecimentosSection({
       {
         onSuccess: () => setEditingId(null),
         onError: (e) =>
-          setError(e instanceof Error ? e.message : 'Não foi possível guardar o reconhecimento.'),
+          setError(e instanceof Error ? e.message : 'Could not save the recognition.'),
       },
     )
   }
 
   function handleDelete(r: Reconhecimento) {
-    if (!window.confirm(`Apagar este reconhecimento de ${formatPrice(r.Valor_Reconhecimento)}?`))
-      return
     deleteMutation.mutate(
       { id: r.ID_Reconhecimento },
       {
         onError: (e) =>
-          setError(e instanceof Error ? e.message : 'Não foi possível apagar o reconhecimento.'),
+          setError(e instanceof Error ? e.message : 'Could not delete the recognition.'),
       },
     )
   }
@@ -668,59 +806,99 @@ function ReconhecimentosSection({
   const contractYearsValid =
     Number.isInteger(contractYears) && contractYears >= 1 && contractYears <= 100
   const contractPlan =
-    isContract && contractOpen && contractYearsValid && contractForm.startDate
-      ? planMaintenancePropagation(order, contractForm.startDate, contractYears)
+    isContract &&
+    contractOpen &&
+    contractYearsValid &&
+    contractForm.startDate &&
+    contractForm.recognitionDate
+      ? planMaintenancePropagation(
+          order,
+          contractForm.startDate,
+          contractYears,
+          contractForm.recognitionDate,
+        )
       : []
 
   function handlePropagateWarranty() {
     const monthly = warrantyPlan[0]?.value ?? 0
-    if (
-      !window.confirm(
-        `Propagar ${warrantyPlan.length} reconhecimentos de garantia (WP) de ${formatPrice(monthly)}/mês, a partir de ${formatOrderDate(
-          warrantyPlan[0]?.date ?? null,
-        )}? Total: ${formatPrice(warrantyPlan.reduce((s, l) => s + l.value, 0))}.`,
-      )
-    )
-      return
-    setError(null)
-    propagateMutation.mutate(
-      { kind: 'warranty' },
-      {
-        onError: (e) =>
-          setError(
-            e instanceof Error
-              ? e.message
-              : 'Não foi possível propagar os reconhecimentos de garantia.',
-          ),
-      },
-    )
+    setPropagateConfirm({
+      kind: 'warranty',
+      description: `Propagate ${warrantyPlan.length} warranty recognitions (WP) at ${formatPrice(monthly)}/month, starting ${formatOrderDate(
+        warrantyPlan[0]?.date ?? null,
+      )}? Total: ${formatPrice(warrantyPlan.reduce((s, l) => s + l.value, 0))}.`,
+    })
   }
 
   function handlePropagateContract() {
     setError(null)
     const years = Number(contractForm.years)
-    if (!contractForm.startDate || !Number.isInteger(years) || years < 1 || years > 100) {
-      setError('Indique o início do contrato e um nº de anos inteiro entre 1 e 100.')
+    if (
+      !contractForm.startDate ||
+      !contractForm.recognitionDate ||
+      !Number.isInteger(years) ||
+      years < 1 ||
+      years > 100
+    ) {
+      setError(
+        'Provide the contract start date, recognition date and a whole number of years between 1 and 100.',
+      )
       return
     }
-    const preview = planMaintenancePropagation(order, contractForm.startDate, years)
-    if (
-      !window.confirm(
-        `Propagar ${preview.length} reconhecimentos de manutenção (CM) de ${formatPrice(preview[0]?.value ?? 0)}/mês, a partir de ${formatOrderDate(
-          preview[0]?.date ?? null,
-        )}? Total: ${formatPrice(preview.reduce((s, l) => s + l.value, 0))}.`,
-      )
+    const preview = planMaintenancePropagation(
+      order,
+      contractForm.startDate,
+      years,
+      contractForm.recognitionDate,
     )
+    setPropagateConfirm({
+      kind: 'maintenance',
+      description: `Propagate ${preview.length} maintenance recognitions (CM) at ${formatPrice(preview[0]?.value ?? 0)}/month, starting ${formatOrderDate(
+        preview[0]?.date ?? null,
+      )}? Total: ${formatPrice(preview.reduce((s, l) => s + l.value, 0))}.`,
+      startDate: contractForm.startDate,
+      years,
+      recognitionDate: contractForm.recognitionDate,
+    })
+  }
+
+  // Fires the deferred propagation mutation once the user confirms the in-app
+  // dialog. Closing the dialog (Cancel / Escape / backdrop) clears the pending
+  // request without mutating.
+  function confirmPropagate() {
+    if (!propagateConfirm) return
+    setError(null)
+    if (propagateConfirm.kind === 'warranty') {
+      propagateMutation.mutate(
+        { kind: 'warranty' },
+        {
+          onSuccess: () => setPropagateConfirm(null),
+          onError: (e) =>
+            setError(
+              e instanceof Error
+                ? e.message
+                : 'Could not propagate the warranty recognitions.',
+            ),
+        },
+      )
       return
+    }
     propagateMutation.mutate(
-      { kind: 'maintenance', startDate: contractForm.startDate, years },
       {
-        onSuccess: () => setContractOpen(false),
+        kind: 'maintenance',
+        startDate: propagateConfirm.startDate,
+        years: propagateConfirm.years,
+        recognitionDate: propagateConfirm.recognitionDate,
+      },
+      {
+        onSuccess: () => {
+          setContractOpen(false)
+          setPropagateConfirm(null)
+        },
         onError: (e) =>
           setError(
             e instanceof Error
               ? e.message
-              : 'Não foi possível propagar os reconhecimentos de manutenção.',
+              : 'Could not propagate the maintenance recognitions.',
           ),
       },
     )
@@ -728,24 +906,24 @@ function ReconhecimentosSection({
 
   const propagateActions = (
     <div className="flex flex-wrap items-center gap-2">
-      {canPropagateWarranty && canAdd && (
+      {canPropagateWarranty && canAdd && canAddRow && (
         <Button
           size="sm"
           variant="secondary"
           onClick={handlePropagateWarranty}
           disabled={propagateMutation.isPending}
         >
-          <Sparkles className="size-4" aria-hidden /> Propagar garantia
+          <Sparkles className="size-4" aria-hidden /> Propagate warranty
         </Button>
       )}
-      {isContract && canAdd && !contractOpen && (
+      {isContract && canAdd && canAddRow && !contractOpen && (
         <Button
           size="sm"
           variant="secondary"
           onClick={() => setContractOpen(true)}
           disabled={propagateMutation.isPending}
         >
-          <Sparkles className="size-4" aria-hidden /> Propagar contrato
+          <Sparkles className="size-4" aria-hidden /> Propagate contract
         </Button>
       )}
     </div>
@@ -753,13 +931,13 @@ function ReconhecimentosSection({
 
   return (
     <SectionCard
-      title="RECONHECIMENTOS"
+      title="RECOGNITIONS"
       action={
         <div className="flex flex-wrap items-center gap-2">
           {propagateActions}
-          {canAdd && !adding && (
+          {canAddRow && !adding && (
             <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
-              <Plus className="size-4" aria-hidden /> Adicionar Reconhecimento
+              <Plus className="size-4" aria-hidden /> Add Recognition
             </Button>
           )}
         </div>
@@ -776,19 +954,28 @@ function ReconhecimentosSection({
       {contractOpen && (
         <div className="flex flex-wrap items-end gap-2 border-b border-border bg-surface-muted p-3">
           <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
-            Início do contrato
-            <Input
-              type="date"
-              aria-label="Início do contrato"
-              value={contractForm.startDate}
-              onChange={(e) => setContractForm((f) => ({ ...f, startDate: e.target.value }))}
+            Contract start
+            <DatePicker
+              aria-label="Contract start"
+              value={contractForm.startDate || null}
+              onChange={(next) => setContractForm((f) => ({ ...f, startDate: next ?? '' }))}
             />
           </label>
           <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
-            Nº de anos
+            Recognition date
+            <DatePicker
+              aria-label="Recognition date"
+              value={contractForm.recognitionDate || null}
+              onChange={(next) =>
+                setContractForm((f) => ({ ...f, recognitionDate: next ?? '' }))
+              }
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
+            Years
             <Input
               type="number"
-              aria-label="Nº de anos do contrato"
+              aria-label="Contract years"
               min="1"
               max="100"
               step="1"
@@ -801,7 +988,7 @@ function ReconhecimentosSection({
             onClick={handlePropagateContract}
             disabled={propagateMutation.isPending}
           >
-            Propagar
+            Propagate
           </Button>
           <Button
             size="sm"
@@ -809,11 +996,11 @@ function ReconhecimentosSection({
             onClick={() => setContractOpen(false)}
             disabled={propagateMutation.isPending}
           >
-            Cancelar
+            Cancel
           </Button>
           {contractPlan.length > 0 && (
             <span className="text-[10px] text-foreground/60">
-              {contractPlan.length} linhas de {formatPrice(contractPlan[0].value)}/mês • total{' '}
+              {contractPlan.length} rows of {formatPrice(contractPlan[0].value)}/mo • total{' '}
               {formatPrice(contractPlan.reduce((s, l) => s + l.value, 0))}
             </span>
           )}
@@ -822,13 +1009,14 @@ function ReconhecimentosSection({
       {adding && (
         <div className="flex flex-wrap items-end gap-2 border-b border-border bg-surface-muted p-3">
           <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
-            Tipo
+            Type
             <Select
-              aria-label="Tipo de reconhecimento"
+              aria-label="Recognition type"
               value={form.type}
               onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+              disabled={!canAddRow}
             >
-              {tpReconhecimentos.map((o) => (
+              {availableReconhecimentoTypes.map((o) => (
                 <option key={String(o.id)} value={String(o.id)}>
                   {o.label}
                 </option>
@@ -837,30 +1025,31 @@ function ReconhecimentosSection({
           </label>
           <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
             Data
-            <Input
-              type="date"
-              aria-label="Data do reconhecimento"
-              value={form.date}
-              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+            <DatePicker
+              aria-label="Recognition date"
+              value={form.date || null}
+              onChange={(next) => setForm((f) => ({ ...f, date: next ?? '' }))}
+              disabled={!canAddRow}
             />
           </label>
           <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wide text-foreground-muted">
-            Valor
+            Value
             <Input
               type="number"
-              aria-label="Valor do reconhecimento"
+              aria-label="Recognition value"
               value={form.value}
               min="0"
               max={capacity}
               step="0.01"
               onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
+              disabled={!canAddRow}
             />
           </label>
-          <Button size="sm" onClick={handleAdd} disabled={saving}>
-            Adicionar
+          <Button size="sm" onClick={handleAdd} disabled={saving || !canAddRow}>
+            Add
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setAdding(false)} disabled={saving}>
-            Cancelar
+            Cancel
           </Button>
         </div>
       )}
@@ -875,18 +1064,18 @@ function ReconhecimentosSection({
 
       {rows.length === 0 ? (
         <p className="m-3 rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-foreground/50">
-          Sem reconhecimentos.
+          No recognitions.
         </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border bg-surface-muted text-left text-[10px] uppercase text-foreground-muted">
-                <th className="px-2.5 py-1.5 font-semibold">Tipo</th>
+                <th className="px-2.5 py-1.5 font-semibold">Type</th>
                 <th className="px-2.5 py-1.5 font-semibold">Data do Reconhecimento</th>
-                <th className="px-2.5 py-1.5 text-right font-semibold">Valor</th>
-                <th className="px-2.5 py-1.5 font-semibold">Estado</th>
-                {canAdd && <th className="px-2.5 py-1.5 text-right font-semibold">Ações</th>}
+                <th className="px-2.5 py-1.5 text-right font-semibold">Value</th>
+                <th className="px-2.5 py-1.5 font-semibold">Status</th>
+                {canAdd && <th className="px-2.5 py-1.5 text-right font-semibold">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -900,11 +1089,12 @@ function ReconhecimentosSection({
                     >
                       <td className="px-2.5 py-1.5">
                         <Select
-                          aria-label="Tipo de reconhecimento"
+                          aria-label="Recognition type"
                           value={editForm.type}
                           onChange={(e) => setEditForm((f) => ({ ...f, type: e.target.value }))}
+                          disabled={!canEditRow}
                         >
-                          {tpReconhecimentos.map((o) => (
+                          {availableReconhecimentoTypes.map((o) => (
                             <option key={String(o.id)} value={String(o.id)}>
                               {o.label}
                             </option>
@@ -912,21 +1102,22 @@ function ReconhecimentosSection({
                         </Select>
                       </td>
                       <td className="px-2.5 py-1.5">
-                        <Input
-                          type="date"
-                          aria-label="Data do reconhecimento"
-                          value={editForm.date}
-                          onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))}
+                        <DatePicker
+                          aria-label="Recognition date"
+                          value={editForm.date || null}
+                          onChange={(next) => setEditForm((f) => ({ ...f, date: next ?? '' }))}
+                          disabled={!canEditRow}
                         />
                       </td>
                       <td className="px-2.5 py-1.5">
                         <Input
                           type="number"
-                          aria-label="Valor do reconhecimento"
+                          aria-label="Recognition value"
                           value={editForm.value}
                           min="0"
                           step="0.01"
                           onChange={(e) => setEditForm((f) => ({ ...f, value: e.target.value }))}
+                          disabled={!canEditRow}
                         />
                       </td>
                       <td className="px-2.5 py-1.5" />
@@ -934,9 +1125,9 @@ function ReconhecimentosSection({
                         <Button
                           size="sm"
                           onClick={() => saveEditRow(r)}
-                          disabled={updateMutation.isPending}
+                          disabled={updateMutation.isPending || !canEditRow}
                         >
-                          Guardar
+                          Save
                         </Button>
                         <Button
                           size="sm"
@@ -944,7 +1135,7 @@ function ReconhecimentosSection({
                           onClick={() => setEditingId(null)}
                           disabled={updateMutation.isPending}
                         >
-                          Cancelar
+                          Cancel
                         </Button>
                       </td>
                     </tr>
@@ -974,13 +1165,13 @@ function ReconhecimentosSection({
                         </span>
                       )}
                     </td>
-                    {canAdd && (
+                    {canAdd && canEditRow && (
                       <td className="px-2.5 py-1.5 text-right">
                         <div className="inline-flex items-center gap-1">
                           <Button
                             size="sm"
                             variant="ghost"
-                            aria-label={`Editar linha de reconhecimento ${r.ID_Reconhecimento}`}
+                            aria-label={`Edit recognition row ${r.ID_Reconhecimento}`}
                             onClick={() => startEditRow(r)}
                             disabled={updateMutation.isPending || deleteMutation.isPending}
                           >
@@ -989,7 +1180,410 @@ function ReconhecimentosSection({
                           <Button
                             size="sm"
                             variant="ghost"
-                            aria-label={`Apagar linha de reconhecimento ${r.ID_Reconhecimento}`}
+                            aria-label={`Delete recognition row ${r.ID_Reconhecimento}`}
+                            onClick={() => handleDelete(r)}
+                            disabled={updateMutation.isPending || deleteMutation.isPending}
+                          >
+                            <Trash2 className="size-3.5" aria-hidden />
+                          </Button>
+                        </div>
+                      </td>
+                    )}
+                    {canAdd && !canEditRow && (
+                      <td className="px-2.5 py-1.5 text-right text-[10px] text-foreground/45">
+                        <span
+                          className="inline-flex items-center gap-1"
+                          aria-label="Field locked (month closed)"
+                          title="Recognition rows are locked because this order's month has closed. Only an admin can change them."
+                        >
+                          <LockIcon /> Locked
+                        </span>
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ConfirmDialog
+        open={propagateConfirm !== null}
+        title="Propagate recognitions"
+        description={propagateConfirm?.description ?? ''}
+        confirmLabel="Propagate"
+        cancelLabel="Cancel"
+        busy={propagateMutation.isPending}
+        onConfirm={confirmPropagate}
+        onClose={() => setPropagateConfirm(null)}
+      />
+    </SectionCard>
+  )
+}
+
+/** Sub-table of Kit_Consumables for an order (dbo.Kit_Consumables). Mirrors the
+ *  ReconhecimentosSection shape — inline add/edit/delete (trash fires the
+ *  mutation directly, no confirm dialog) — but without capacity enforcement:
+ *  the Balance (Kit_Amount − Σ Total_Price) is display-only, computed by the
+ *  parent Kit tab. dbo.Kit_Consumables has no audit columns, so no
+ *  ID_User/DT_User are sent. */
+function KitConsumablesSection({
+  order,
+  rows,
+  role,
+  queryError,
+}: {
+  order: Order
+  rows: KitConsumable[]
+  role: RoleLike
+  queryError: string | null
+}) {
+  const orderId = order.ID_Order
+  const queryClient = useQueryClient()
+  const addMutation = useAddKitConsumable(orderId)
+  const updateMutation = useUpdateKitConsumable(orderId)
+  const deleteMutation = useDeleteKitConsumable(orderId)
+
+  const canAdd = role !== 'viewer'
+
+  const emptyForm = () => ({
+    date: new Date().toISOString().slice(0, 10),
+    internalOrder: '',
+    material: '',
+    description: '',
+    quant: '',
+    unitPrice: '',
+    totalPrice: '',
+  })
+
+  const [adding, setAdding] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [form, setForm] = useState(emptyForm)
+
+  // Inline row editing.
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState(emptyForm)
+
+  /** Recompute Total_Price = Quant × Unit_Price when either changes, unless the
+   *  user has overridden it. Kept simple: always recompute from the two inputs. */
+  function withComputedTotal(
+    f: ReturnType<typeof emptyForm>,
+  ): ReturnType<typeof emptyForm> {
+    const quant = Number(f.quant)
+    const unit = Number(f.unitPrice)
+    const computed =
+      Number.isFinite(quant) && Number.isFinite(unit) ? String(round2(quant * unit)) : ''
+    return { ...f, totalPrice: computed }
+  }
+
+  /** Σ Total_Price of the rows already persisted. Used by both the add and the
+   *  edit paths so the cap check stays in one place (validateKitForm). */
+  const existingTotal = rows.reduce((sum, r) => sum + (r.Total_Price ?? 0), 0)
+
+  async function handleAdd() {
+    setError(null)
+    const validation = validateKitForm(form, existingTotal, order.Kit_Amount ?? null)
+    if (validation) {
+      setError(validation)
+      return
+    }
+    setSaving(true)
+    try {
+      await addMutation.mutateAsync({
+        ID_Order: orderId,
+        Date: new Date(form.date).toISOString(),
+        Internal_Order: form.internalOrder,
+        Material: form.material,
+        Description: form.description,
+        Quant: Number(form.quant),
+        Unit_Price: Number(form.unitPrice),
+        Total_Price: Number(form.totalPrice),
+      })
+      // The mutation hook appends the returned row directly to the cache. Refresh
+      // from server truth in the background so ordering and the detail remain fresh.
+      queryClient.invalidateQueries({ queryKey: ['orders', 'kit-consumables', orderId] })
+      queryClient.invalidateQueries({ queryKey: ['orders', 'detail', orderId] })
+      setAdding(false)
+      setForm(emptyForm())
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : 'Could not add the kit consumable.',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function startEditRow(r: KitConsumable) {
+    setEditingId(r.ID_Kit)
+    setEditForm({
+      date: r.Date ? r.Date.slice(0, 10) : '',
+      internalOrder: r.Internal_Order ?? '',
+      material: r.Material ?? '',
+      description: r.Description ?? '',
+      quant: r.Quant == null ? '' : String(r.Quant),
+      unitPrice: r.Unit_Price == null ? '' : String(r.Unit_Price),
+      totalPrice: r.Total_Price == null ? '' : String(r.Total_Price),
+    })
+    setError(null)
+  }
+
+  function saveEditRow(r: KitConsumable) {
+    // Exclude the row being edited from the existing total so its own value isn't
+    // counted twice in the cap check.
+    const totalExcludingSelf = existingTotal - (r.Total_Price ?? 0)
+    const validation = validateKitForm(editForm, totalExcludingSelf, order.Kit_Amount ?? null)
+    if (validation) {
+      setError(validation)
+      return
+    }
+    updateMutation.mutate(
+      {
+        id: r.ID_Kit,
+        patch: {
+          Date: new Date(editForm.date).toISOString(),
+          Internal_Order: editForm.internalOrder,
+          Material: editForm.material,
+          Description: editForm.description,
+          Quant: Number(editForm.quant),
+          Unit_Price: Number(editForm.unitPrice),
+          Total_Price: Number(editForm.totalPrice),
+        },
+      },
+      {
+        onSuccess: () => setEditingId(null),
+        onError: (e) =>
+          setError(
+            e instanceof Error
+              ? e.message
+              : 'Could not save the kit consumable.',
+          ),
+      },
+    )
+  }
+
+  function handleDelete(r: KitConsumable) {
+    deleteMutation.mutate(
+      { id: r.ID_Kit },
+      {
+        onError: (e) =>
+          setError(
+            e instanceof Error
+              ? e.message
+              : 'Could not delete the kit consumable.',
+          ),
+      },
+    )
+  }
+
+  return (
+    <SectionCard
+      title="CONSUMÍVEIS DO KIT"
+      action={
+        canAdd &&
+        !adding && (
+          <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+            <Plus className="size-4" aria-hidden /> Add Consumable
+          </Button>
+        )
+      }
+    >
+      {queryError && (
+        <p
+          role="alert"
+          className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {queryError}
+        </p>
+      )}
+      {error && (
+        <p
+          role="alert"
+          className="border-b border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {error}
+        </p>
+      )}
+
+      {rows.length === 0 && !adding ? (
+        <p className="m-3 rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-foreground/50">
+          No kit consumables.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead>
+              <tr className="border-b border-border bg-surface-muted text-left text-[10px] uppercase text-foreground-muted">
+                <th className="px-2.5 py-1.5 font-semibold">Data</th>
+                <th className="px-2.5 py-1.5 font-semibold">Internal Order</th>
+                <th className="px-2.5 py-1.5 font-semibold">Material</th>
+                <th className="px-2.5 py-1.5 font-semibold">Description</th>
+                <th className="px-2.5 py-1.5 text-right font-semibold">Quant</th>
+                <th className="px-2.5 py-1.5 text-right font-semibold">Unit Price</th>
+                <th className="px-2.5 py-1.5 text-right font-semibold">Total</th>
+                {canAdd && <th className="px-2.5 py-1.5 text-right font-semibold">Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {adding && (
+                <tr className="border-b border-border/50 bg-surface-muted">
+                  <KitConsumableForm
+                    form={form}
+                    onChange={(f) => setForm(withComputedTotal(f))}
+                  />
+                  <td className="px-2.5 py-1.5 text-right">
+                    <Button size="sm" onClick={handleAdd} disabled={saving}>
+                      Add
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setAdding(false)}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </Button>
+                  </td>
+                </tr>
+              )}
+              {rows.map((r) => {
+                if (editingId === r.ID_Kit) {
+                  return (
+                    <tr
+                      key={r.ID_Kit}
+                      className="border-b border-border/50 bg-surface-muted"
+                    >
+                      <td className="px-2.5 py-1.5">
+                        <DatePicker
+                          aria-label="Consumable date"
+                          value={editForm.date || null}
+                          onChange={(next) =>
+                            setEditForm(
+                              withComputedTotal({ ...editForm, date: next ?? '' }),
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="text"
+                          aria-label="Internal order"
+                          value={editForm.internalOrder}
+                          onChange={(e) =>
+                            setEditForm(withComputedTotal({ ...editForm, internalOrder: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="text"
+                          aria-label="Material"
+                          value={editForm.material}
+                          onChange={(e) =>
+                            setEditForm(withComputedTotal({ ...editForm, material: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="text"
+                          aria-label="Description"
+                          value={editForm.description}
+                          onChange={(e) =>
+                            setEditForm(withComputedTotal({ ...editForm, description: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="number"
+                          aria-label="Quantity"
+                          min="1"
+                          step="1"
+                          value={editForm.quant}
+                          onChange={(e) =>
+                            setEditForm(withComputedTotal({ ...editForm, quant: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="number"
+                          aria-label="Unit price"
+                          min="0"
+                          step="0.01"
+                          value={editForm.unitPrice}
+                          onChange={(e) =>
+                            setEditForm(withComputedTotal({ ...editForm, unitPrice: e.target.value }))
+                          }
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Input
+                          type="number"
+                          aria-label="Total"
+                          min="0"
+                          step="0.01"
+                          value={editForm.totalPrice}
+                          onChange={(e) =>
+                            setEditForm({ ...editForm, totalPrice: e.target.value })
+                          }
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right">
+                        <Button
+                          size="sm"
+                          onClick={() => saveEditRow(r)}
+                          disabled={updateMutation.isPending}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEditingId(null)}
+                          disabled={updateMutation.isPending}
+                        >
+                          Cancel
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                }
+                return (
+                  <tr key={r.ID_Kit} className="border-b border-border/50">
+                    <td className="px-2.5 py-1.5 text-[11px]">{formatOrderDate(r.Date)}</td>
+                    <td className="px-2.5 py-1.5 text-[11px]">
+                      {displayText(r.Internal_Order)}
+                    </td>
+                    <td className="px-2.5 py-1.5 text-[11px]">{displayText(r.Material)}</td>
+                    <td className="px-2.5 py-1.5 text-[11px]">{displayText(r.Description)}</td>
+                    <td className="px-2.5 py-1.5 text-right text-[11px]">{r.Quant ?? DASH}</td>
+                    <td className="px-2.5 py-1.5 text-right text-[11px]">
+                      {formatPrice(r.Unit_Price)}
+                    </td>
+                    <td className="px-2.5 py-1.5 text-right text-[11px]">
+                      {formatPrice(r.Total_Price)}
+                    </td>
+                    {canAdd && (
+                      <td className="px-2.5 py-1.5 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Edit kit consumable ${r.ID_Kit}`}
+                            onClick={() => startEditRow(r)}
+                            disabled={updateMutation.isPending || deleteMutation.isPending}
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Delete kit consumable ${r.ID_Kit}`}
                             onClick={() => handleDelete(r)}
                             disabled={updateMutation.isPending || deleteMutation.isPending}
                           >
@@ -1007,6 +1601,139 @@ function ReconhecimentosSection({
       )}
     </SectionCard>
   )
+}
+
+/** The inline add-form fields (Date, Internal Order, Material, Description, Quant,
+ *  Unit Price, Total). Total is auto-computed by the caller; it stays editable so
+ *  a user can override a rounded/adjusted value. */
+function KitConsumableForm({
+  form,
+  onChange,
+}: {
+  form: ReturnType<() => {
+    date: string
+    internalOrder: string
+    material: string
+    description: string
+    quant: string
+    unitPrice: string
+    totalPrice: string
+  }>
+  onChange: (f: typeof form) => void
+}) {
+  // Renders the seven field cells for the inline "add consumable" row. The
+  // caller wraps these in a `<tr>` inside the consumables `<tbody>` so the
+  // layout matches the inline-edit row exactly (one compact cell per field,
+  // no vertical labels above each input).
+  return (
+    <>
+      <td className="px-2.5 py-1.5">
+        <DatePicker
+          aria-label="Consumable date"
+          value={form.date || null}
+          onChange={(next) => onChange({ ...form, date: next ?? '' })}
+        />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <Input
+          type="text"
+          aria-label="Internal order"
+          value={form.internalOrder}
+          onChange={(e) => onChange({ ...form, internalOrder: e.target.value })}
+        />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <Input
+          type="text"
+          aria-label="Material"
+          value={form.material}
+          onChange={(e) => onChange({ ...form, material: e.target.value })}
+        />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <Input
+          type="text"
+          aria-label="Description"
+          value={form.description}
+          onChange={(e) => onChange({ ...form, description: e.target.value })}
+        />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <Input
+          type="number"
+          aria-label="Quantity"
+          min="1"
+          step="1"
+          value={form.quant}
+          onChange={(e) => onChange({ ...form, quant: e.target.value })}
+        />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <Input
+          type="number"
+          aria-label="Unit price"
+          min="0"
+          step="0.01"
+          value={form.unitPrice}
+          onChange={(e) => onChange({ ...form, unitPrice: e.target.value })}
+        />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <Input
+          type="number"
+          aria-label="Total"
+          min="0"
+          step="0.01"
+          value={form.totalPrice}
+          onChange={(e) => onChange({ ...form, totalPrice: e.target.value })}
+        />
+      </td>
+    </>
+  )
+}
+
+/** Validate a kit-consumable form. Returns an English error message or null.
+ *
+ *  `existingTotal` is the Σ Total_Price of the rows already persisted for this
+ *  order; when editing, the caller subtracts the row being edited from that sum
+ *  first so we never double-count. `kitAmount` is the order's Kit_Amount cap
+ *  (req G3): the new total must fit under it, otherwise the save is rejected
+ *  with a message that names the remaining budget. */
+function validateKitForm(
+  f: {
+    date: string
+    internalOrder: string
+    material: string
+    description: string
+    quant: string
+    unitPrice: string
+    totalPrice: string
+  },
+  existingTotal: number,
+  kitAmount: number | null,
+): string | null {
+  if (!f.date) return 'Date is required.'
+  if (!f.internalOrder.trim()) return 'Internal order is required.'
+  if (!f.material.trim()) return 'Material is required.'
+  if (!f.description.trim()) return 'Description is required.'
+  const quant = Number(f.quant)
+  if (!Number.isFinite(quant) || quant <= 0 || !Number.isInteger(quant)) {
+    return 'Quantity must be a positive integer.'
+  }
+  const unit = Number(f.unitPrice)
+  if (!Number.isFinite(unit) || unit < 0) return 'Invalid unit price.'
+  const total = Number(f.totalPrice)
+  if (!Number.isFinite(total) || total < 0) return 'Invalid total.'
+  if (kitAmount != null && existingTotal + total > kitAmount + 0.005) {
+    const remaining = Math.max(0, kitAmount - existingTotal)
+    return `Kit amount would be exceeded. Remaining budget: ${formatPrice(remaining)}.`
+  }
+  return null
+}
+
+/** Round to 2 decimals (money). Avoids floating-point noise like 0.30000000000000004. */
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
 function DocumentosTable({
@@ -1056,6 +1783,10 @@ function DocumentosTable({
   )
 
   const canAdd = role !== 'viewer'
+  // Adding a new invoice is always open for any non-viewer; only edit/delete
+  // of existing rows is gated by the month lock. (canAddFinancial / canEditFinancial)
+  const canAddRow = canAddFinancial(role)
+  const canEditRow = canEditFinancial(order, role)
   const netInvoiced = rows.reduce((sum, d) => sum + (d.Valor_Doc_FT ?? 0), 0)
   // req 6: green highlight when the net invoiced equals Sell_Price.
   const fullyInvoiced =
@@ -1070,11 +1801,19 @@ function DocumentosTable({
   }
 
   function validateDoc(value: number, otherNet: number): string | null {
-    if (!Number.isFinite(value)) return 'Valor inválido.'
+    if (!Number.isFinite(value)) return 'Invalid value.'
     if (sellPrice != null && otherNet + value > sellPrice + 0.005) {
-      return `O net faturado não pode ultrapassar o Sell Price (${formatPrice(sellPrice)}).`
+      return `Net invoiced cannot exceed the Sell Price (${formatPrice(sellPrice)}).`
     }
     return null
+  }
+
+  /** Remaining capacity left before the next invoice tips the cumulative net over
+   *  Sell_Price. Negative when the typed value already pushes past the limit, so
+   *  the user sees the overage inline while typing (req D). */
+  function remainingCapacity(existingNet: number, value: number): number | null {
+    if (sellPrice == null || sellPrice <= 0) return null
+    return sellPrice - existingNet - value
   }
 
   function startAdd() {
@@ -1128,7 +1867,7 @@ function DocumentosTable({
         value: '',
       })
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Não foi possível adicionar o documento.')
+      setError(reason instanceof Error ? reason.message : 'Could not add the document.')
     } finally {
       setSaving(false)
     }
@@ -1166,18 +1905,17 @@ function DocumentosTable({
       {
         onSuccess: () => setEditingId(null),
         onError: (e) =>
-          setError(e instanceof Error ? e.message : 'Não foi possível guardar o documento.'),
+          setError(e instanceof Error ? e.message : 'Could not save the document.'),
       },
     )
   }
 
   function handleDelete(d: DocumentoFaturacao) {
-    if (!window.confirm(`Apagar o documento ${displayText(d.N_Doc_FT)}?`)) return
     deleteMutation.mutate(
       { id: d.ID_Facturacao },
       {
         onError: (e) =>
-          setError(e instanceof Error ? e.message : 'Não foi possível apagar o documento.'),
+          setError(e instanceof Error ? e.message : 'Could not delete the document.'),
       },
     )
   }
@@ -1186,9 +1924,9 @@ function DocumentosTable({
     <SectionCard
       title="DOCUMENTOS FATURADOS"
       action={
-        canAdd && !adding && documentTypes.length > 0 ? (
+        canAdd && canAddRow && !adding && documentTypes.length > 0 ? (
           <Button size="sm" variant="secondary" onClick={startAdd}>
-            <Plus className="size-4" aria-hidden /> Adicionar documento
+            <Plus className="size-4" aria-hidden /> Add documento
           </Button>
         ) : undefined
       }
@@ -1214,46 +1952,6 @@ function DocumentosTable({
           {documentTypesError}
         </p>
       )}
-      {adding && (
-        <div className="flex flex-wrap items-end gap-2 border-b border-border bg-surface-muted p-3">
-          <Input
-            aria-label="Data do documento"
-            type="date"
-            value={form.date}
-            onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-          />
-          <Select
-            aria-label="Tipo de documento"
-            value={form.type}
-            onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
-          >
-            {documentTypes.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.label}
-              </option>
-            ))}
-          </Select>
-          <Input
-            aria-label="Número do documento"
-            placeholder="Nº documento"
-            value={form.number}
-            onChange={(e) => setForm((f) => ({ ...f, number: e.target.value }))}
-          />
-          <Input
-            aria-label="Valor do documento"
-            type="number"
-            step="0.01"
-            value={form.value}
-            onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
-          />
-          <Button size="sm" onClick={handleAdd} disabled={saving}>
-            Adicionar
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setAdding(false)} disabled={saving}>
-            Cancelar
-          </Button>
-        </div>
-      )}
       {error && (
         <p
           role="alert"
@@ -1262,9 +1960,9 @@ function DocumentosTable({
           {error}
         </p>
       )}
-      {rows.length === 0 ? (
+      {rows.length === 0 && !adding ? (
         <p className="m-3 rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-foreground/50">
-          Sem documentos.
+          No documents.
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -1274,11 +1972,77 @@ function DocumentosTable({
                 <th className="px-2.5 py-1.5 font-semibold">Data</th>
                 <th className="px-2.5 py-1.5 font-semibold">Documento</th>
                 <th className="px-2.5 py-1.5 font-semibold">Nº</th>
-                <th className="px-2.5 py-1.5 text-right font-semibold">Valor</th>
-                {canAdd && <th className="px-2.5 py-1.5 text-right font-semibold">Ações</th>}
+                <th className="px-2.5 py-1.5 text-right font-semibold">Value</th>
+                {canAdd && <th className="px-2.5 py-1.5 text-right font-semibold">Actions</th>}
               </tr>
             </thead>
             <tbody>
+              {adding && (
+                <tr className="border-b border-border/50 bg-surface-muted">
+                  <td className="px-2.5 py-1.5">
+                    <DatePicker
+                      aria-label="Document date"
+                      value={form.date || null}
+                      onChange={(next) => setForm((f) => ({ ...f, date: next ?? '' }))}
+                      disabled={!canAddRow}
+                    />
+                  </td>
+                  <td className="px-2.5 py-1.5">
+                    <Select
+                      aria-label="Document type"
+                      value={form.type}
+                      onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+                      disabled={!canAddRow}
+                    >
+                      {documentTypes.map((type) => (
+                        <option key={type.id} value={type.id}>
+                          {type.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </td>
+                  <td className="px-2.5 py-1.5">
+                    <Input
+                      aria-label="Document number"
+                      placeholder="Nº documento"
+                      value={form.number}
+                      onChange={(e) => setForm((f) => ({ ...f, number: e.target.value }))}
+                      disabled={!canAddRow}
+                    />
+                  </td>
+                  <td className="px-2.5 py-1.5">
+                    <div className="flex flex-col gap-1">
+                      <Input
+                        aria-label="Document value"
+                        type="number"
+                        step="0.01"
+                        value={form.value}
+                        onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
+                        disabled={!canAddRow}
+                      />
+                      <DocumentRemainingHint
+                        remaining={remainingCapacity(
+                          netInvoiced,
+                          Number.isFinite(Number(form.value)) ? Number(form.value) : 0,
+                        )}
+                      />
+                    </div>
+                  </td>
+                  <td className="px-2.5 py-1.5 text-right">
+                    <Button size="sm" onClick={handleAdd} disabled={saving || !canAddRow}>
+                      Add
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setAdding(false)}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </Button>
+                  </td>
+                </tr>
+              )}
               {rows.map((d) => {
                 if (editingId === d.ID_Facturacao) {
                   return (
@@ -1287,18 +2051,19 @@ function DocumentosTable({
                       className="border-b border-border/50 bg-surface-muted"
                     >
                       <td className="px-2.5 py-1.5">
-                        <Input
-                          type="date"
-                          aria-label="Data do documento"
-                          value={editForm.date}
-                          onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))}
+                        <DatePicker
+                          aria-label="Document date"
+                          value={editForm.date || null}
+                          onChange={(next) => setEditForm((f) => ({ ...f, date: next ?? '' }))}
+                          disabled={!canEditRow}
                         />
                       </td>
                       <td className="px-2.5 py-1.5">
                         <Select
-                          aria-label="Tipo de documento"
+                          aria-label="Document type"
                           value={editForm.type}
                           onChange={(e) => setEditForm((f) => ({ ...f, type: e.target.value }))}
+                          disabled={!canEditRow}
                         >
                           {editForm.type && !documentTypeLabels.has(editForm.type) && (
                             <option value={editForm.type}>{editForm.type}</option>
@@ -1312,27 +2077,39 @@ function DocumentosTable({
                       </td>
                       <td className="px-2.5 py-1.5">
                         <Input
-                          aria-label="Número do documento"
+                          aria-label="Document number"
                           value={editForm.number}
                           onChange={(e) => setEditForm((f) => ({ ...f, number: e.target.value }))}
+                          disabled={!canEditRow}
                         />
                       </td>
                       <td className="px-2.5 py-1.5">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          aria-label="Valor do documento"
-                          value={editForm.value}
-                          onChange={(e) => setEditForm((f) => ({ ...f, value: e.target.value }))}
-                        />
+                        <div className="flex flex-col gap-1">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            aria-label="Document value"
+                            value={editForm.value}
+                            onChange={(e) => setEditForm((f) => ({ ...f, value: e.target.value }))}
+                            disabled={!canEditRow}
+                          />
+                          <DocumentRemainingHint
+                            remaining={remainingCapacity(
+                              netExcluding(d.ID_Facturacao),
+                              Number.isFinite(Number(editForm.value))
+                                ? Number(editForm.value)
+                                : 0,
+                            )}
+                          />
+                        </div>
                       </td>
                       <td className="px-2.5 py-1.5 text-right">
                         <Button
                           size="sm"
                           onClick={() => saveEditRow(d)}
-                          disabled={updateMutation.isPending}
+                          disabled={updateMutation.isPending || !canEditRow}
                         >
-                          Guardar
+                          Save
                         </Button>
                         <Button
                           size="sm"
@@ -1340,7 +2117,7 @@ function DocumentosTable({
                           onClick={() => setEditingId(null)}
                           disabled={updateMutation.isPending}
                         >
-                          Cancelar
+                          Cancel
                         </Button>
                       </td>
                     </tr>
@@ -1360,13 +2137,13 @@ function DocumentosTable({
                     <td className="px-2.5 py-1.5 text-right text-[11px]">
                       {formatPrice(d.Valor_Doc_FT)}
                     </td>
-                    {canAdd && (
+                    {canAdd && canEditRow && (
                       <td className="px-2.5 py-1.5 text-right">
                         <div className="inline-flex items-center gap-1">
                           <Button
                             size="sm"
                             variant="ghost"
-                            aria-label={`Editar linha de documento ${d.ID_Facturacao}`}
+                            aria-label={`Edit document row ${d.ID_Facturacao}`}
                             onClick={() => startEditRow(d)}
                             disabled={updateMutation.isPending || deleteMutation.isPending}
                           >
@@ -1375,13 +2152,24 @@ function DocumentosTable({
                           <Button
                             size="sm"
                             variant="ghost"
-                            aria-label={`Apagar linha de documento ${d.ID_Facturacao}`}
+                            aria-label={`Delete document row ${d.ID_Facturacao}`}
                             onClick={() => handleDelete(d)}
                             disabled={updateMutation.isPending || deleteMutation.isPending}
                           >
                             <Trash2 className="size-3.5" aria-hidden />
                           </Button>
                         </div>
+                      </td>
+                    )}
+                    {canAdd && !canEditRow && (
+                      <td className="px-2.5 py-1.5 text-right text-[10px] text-foreground/45">
+                        <span
+                          className="inline-flex items-center gap-1"
+                          aria-label="Field locked (month closed)"
+                          title="Invoicing documents are locked because this order's month has closed. Only an admin can change them."
+                        >
+                          <LockIcon /> Locked
+                        </span>
                       </td>
                     )}
                   </tr>
@@ -1409,6 +2197,27 @@ function DocumentosTable({
   )
 }
 
+/** Tiny live hint that sits under the new-document value input. Renders nothing when
+ *  the order has no Sell_Price (the cap doesn't apply); shows the remaining capacity
+ *  when within budget, or the overage when the typed value would push past it. The
+ *  user sees the gap update as they type, so they know whether the line will be
+ *  accepted before pressing Add. */
+function DocumentRemainingHint({ remaining }: { remaining: number | null }) {
+  if (remaining === null) return null
+  if (remaining >= 0) {
+    return (
+      <p aria-live="polite" className="text-[11px] text-foreground/50">
+        Remaining to Sell Price: {formatPrice(remaining)}
+      </p>
+    )
+  }
+  return (
+    <p role="alert" aria-live="polite" className="text-[11px] font-medium text-danger">
+      Exceeds Sell Price by {formatPrice(-remaining)}
+    </p>
+  )
+}
+
 function ObservacoesEditor({ order, role }: { order: Order; role: RoleLike }) {
   const mutation = useUpdateOrder()
   const [value, setValue] = useState(order.Obs ?? '')
@@ -1420,7 +2229,7 @@ function ObservacoesEditor({ order, role }: { order: Order; role: RoleLike }) {
   return (
     <div className="p-3">
       <textarea
-        aria-label="Observações"
+        aria-label="Notes"
         disabled={!canSave || mutation.isPending}
         value={value}
         onChange={(event) => setValue(event.target.value)}
@@ -1437,7 +2246,7 @@ function ObservacoesEditor({ order, role }: { order: Order; role: RoleLike }) {
           onClick={save}
           disabled={!canSave || mutation.isPending || value === (order.Obs ?? '')}
         >
-          Guardar observações
+          Save observações
         </Button>
       </div>
     </div>
@@ -1453,7 +2262,7 @@ function BackButton() {
   return (
     <Button variant="ghost" size="sm" onClick={() => navigate('/orders')}>
       <ArrowLeft className="size-4" aria-hidden />
-      Voltar
+      Back
     </Button>
   )
 }
@@ -1510,6 +2319,7 @@ function OrderDetail({ order }: { order: Order }) {
   const recoQuery = useReconhecimentos(order.ID_Order)
   const docsQuery = useDocumentoFaturacao(order.ID_Order)
   const documentTypesQuery = useDocumentoFaturacaoTypes()
+  const kitConsumablesQuery = useKitConsumables(order.Kit === true ? order.ID_Order : null)
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Draft>({})
@@ -1517,6 +2327,19 @@ function OrderDetail({ order }: { order: Order }) {
   const estado = useMemo(() => orderEstado(order), [order])
   const historico = useMemo(() => isHistorico(order), [order])
   const clientName = order.Client_Name ?? resolveClientName(order.ID_Client)
+
+  // Área → Produto → Instrumento cascade. In view mode labels resolve from the static
+  // fixtures (see viewValue/optionLabel), so the live queries only need to run while
+  // editing — they back the parent-filtered dropdown options. The held child id is
+  // merged back in (mergeSaved) so a legacy value that drifts from its parent stays
+  // visible instead of vanishing from the dropdown.
+  const areasQuery = useAreas({ enabled: editing })
+  const cascadeArea = editing ? draft.ID_Area || undefined : undefined
+  const produtosQuery = useProdutos({ area: cascadeArea, enabled: editing })
+  const cascadeProduto = editing ? Number(draft.ID_Produto) || undefined : undefined
+  const instrumentosQuery = useInstrumentos({ produto: cascadeProduto, enabled: editing })
+  const produtoOptions = mergeSaved(produtosQuery.data, draft.ID_Produto, produtos)
+  const instrumentoOptions = mergeSaved(instrumentosQuery.data, draft.ID_Instrumento, instrumentos)
 
   function startEdit() {
     setDraft(seedDraft(order))
@@ -1548,9 +2371,18 @@ function OrderDetail({ order }: { order: Order }) {
     setDraft((d) => ({ ...d, [key]: value }))
   }
 
+  // Cascade setters mirror the create form: changing Área clears Produto + Instrumento;
+  // changing Produto clears Instrumento. The child dropdowns re-filter on the next render.
+  function setAreaField(value: string) {
+    setDraft((d) => ({ ...d, ID_Area: value, ID_Produto: '', ID_Instrumento: '' }))
+  }
+  function setProdutoField(value: string) {
+    setDraft((d) => ({ ...d, ID_Produto: value, ID_Instrumento: '' }))
+  }
+
   // Recognition split (req 9): the warranty vs instrument bucket math lives in the
   // pure `recognitionTotals` helper so it stays identical in mock and HTTP repos and
-  // is unit-tested. "Instrumento por Reconhecer" = (Sell_Price − Warranty_Reserve) −
+  // is unit-tested. "Instrument to Recognise" = (Sell_Price − Warranty_Reserve) −
   // instrument reconhecido (the fix for the old formula that dropped the reserve).
   const recos = recoQuery.data ?? []
   const totals = recognitionTotals(order, recos)
@@ -1561,7 +2393,7 @@ function OrderDetail({ order }: { order: Order }) {
     warrantyPorReconhecer,
     totalReconhecido,
   } = totals
-  // req 6: green highlight on "Total Reconhecido" when it reaches Sell_Price.
+  // req 6: green highlight on "Total Recognised" when it reaches Sell_Price.
   const fullyRecognized =
     order.Sell_Price != null &&
     order.Sell_Price > 0 &&
@@ -1572,20 +2404,32 @@ function OrderDetail({ order }: { order: Order }) {
   const documentTypesError = documentTypesQuery.isError
     ? documentTypesQuery.error instanceof Error
       ? documentTypesQuery.error.message
-      : 'Não foi possível carregar os tipos de documento.'
+      : 'Could not load document types.'
     : null
   const recoError = recoQuery.isError
     ? recoQuery.error instanceof Error
       ? recoQuery.error.message
-      : 'Não foi possível carregar os reconhecimentos.'
+      : 'Could not load recognitions.'
     : null
   const docsError = docsQuery.isError
     ? docsQuery.error instanceof Error
       ? docsQuery.error.message
-      : 'Não foi possível carregar os documentos faturados.'
+      : 'Could not load invoicing documents.'
     : null
   const netInvoiced = docs.reduce((sum, d) => sum + (d.Valor_Doc_FT ?? 0), 0)
   const porFaturar = (order.Sell_Price ?? 0) - netInvoiced
+
+  // Kit tab (only for kit orders): Balance = Kit_Amount − Σ Kit_Consumables.Total_Price.
+  // The consumables query is enabled only when order.Kit === true (above), so the
+  // empty array is the correct fallback for non-kit orders and during loading.
+  const kitConsumables = kitConsumablesQuery.data ?? []
+  const kitConsumedTotal = kitConsumables.reduce((sum, r) => sum + (r.Total_Price ?? 0), 0)
+  const kitBalance = (order.Kit_Amount ?? 0) - kitConsumedTotal
+  const kitConsumablesError = kitConsumablesQuery.isError
+    ? kitConsumablesQuery.error instanceof Error
+      ? kitConsumablesQuery.error.message
+      : 'Could not load kit consumables.'
+    : null
 
   const canEnterEdit = role !== 'viewer' && (!historico || role === 'admin' || role === 'editor')
   const canCreate = role !== 'viewer'
@@ -1619,13 +2463,13 @@ function OrderDetail({ order }: { order: Order }) {
       <MetricCard
         tone="purple"
         icon={BadgeCheck}
-        label="Instrumento Reconhecido"
+        label="Instrument Recognised"
         value={formatPrice(instrumentReconhecido)}
       />
       <MetricCard
         tone="orange"
         icon={Clock}
-        label="Instrumento por Reconhecer"
+        label="Instrument to Recognise"
         value={formatPrice(instrumentPorReconhecer)}
       />
       {/* Warranty KPIs only apply to warranty order kinds (req 11). */}
@@ -1634,13 +2478,13 @@ function OrderDetail({ order }: { order: Order }) {
           <MetricCard
             tone="green"
             icon={ShieldCheck}
-            label="Garantia Reconhecida"
+            label="Warranty Recognised"
             value={formatPrice(warrantyReconhecido)}
           />
           <MetricCard
             tone="orange"
             icon={ShieldAlert}
-            label="Garantia por Reconhecer"
+            label="Warranty to Recognise"
             value={formatPrice(warrantyPorReconhecer)}
           />
         </>
@@ -1648,7 +2492,7 @@ function OrderDetail({ order }: { order: Order }) {
       <MetricCard
         tone="blue"
         icon={TrendingUp}
-        label="Total Reconhecido"
+        label="Total Recognised"
         value={formatPrice(totalReconhecido)}
         highlight={fullyRecognized}
       />
@@ -1677,14 +2521,14 @@ function OrderDetail({ order }: { order: Order }) {
     },
     {
       id: 'faturacao',
-      label: 'Faturação',
+      label: 'Invoicing',
       content: (
         <div className="space-y-3 pt-3.5">
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
             <MetricCard
               tone="orange"
               icon={Receipt}
-              label="Por Faturar"
+              label="Remaining to Invoice"
               value={formatPrice(porFaturar)}
             />
             <MetricCard
@@ -1693,7 +2537,7 @@ function OrderDetail({ order }: { order: Order }) {
               label="Documentos Emitidos"
               value={String(docs.length)}
             />
-            <MetricCard tone="purple" icon={Mail} label="Estado E-Mail" value="Não enviado" />
+            <MetricCard tone="purple" icon={Mail} label="Email Status" value="Not sent" />
           </div>
 
           <SectionCard title="DADOS DE FATURAÇÃO">
@@ -1713,13 +2557,14 @@ function OrderDetail({ order }: { order: Order }) {
                 onChange={(v) => setField(FATURACAO_FIELDS[1].key, v)}
               />
               <BillingField label="Email do Pedido">{displayText(order.Email)}</BillingField>
-              <BillingField label="Contacto Cliente">{displayText(order.Contacto)}</BillingField>
+              <BillingField label="Customer Contact">{displayText(order.Contacto)}</BillingField>
               <BillingField label="Sell Price">{formatPrice(order.Sell_Price)}</BillingField>
-              <BillingField label="Saldo por Faturar">{formatPrice(porFaturar)}</BillingField>
-              <BillingField label="Estado">
-                <Badge tone={order.Facturado ? 'success' : 'neutral'}>
-                  {order.Facturado ? 'Faturado' : 'Não faturado'}
-                </Badge>
+              <BillingField label="Balance to Invoice">{formatPrice(porFaturar)}</BillingField>
+              <BillingField label="Status">
+                {(() => {
+                  const status = invoicingStatus(netInvoiced, order.Sell_Price)
+                  return <Badge tone={status.tone}>{status.label}</Badge>
+                })()}
               </BillingField>
             </div>
           </SectionCard>
@@ -1751,9 +2596,9 @@ function OrderDetail({ order }: { order: Order }) {
                 </strong>
               </div>
               <div className="min-w-0">
-                <span className="block text-[9px] uppercase text-foreground-muted">Estado</span>
+                <span className="block text-[9px] uppercase text-foreground-muted">Status</span>
                 <strong className="mt-1 block text-[11px] font-medium text-foreground">
-                  Não enviado
+                  Not sent
                 </strong>
               </div>
               <div className="flex justify-end gap-2">
@@ -1769,9 +2614,53 @@ function OrderDetail({ order }: { order: Order }) {
         </div>
       ),
     },
+    ...(order.Kit === true
+      ? [
+          {
+            id: 'kit',
+            label: 'Kit',
+            content: (
+              <div className="space-y-3 pt-3.5">
+                <div className="grid grid-cols-2 gap-2 2xl:grid-cols-4">
+                  <EditableMetric
+                    def={KIT_FIELDS[1]}
+                    order={order}
+                    editing={editing}
+                    role={role}
+                    value={draft[KIT_FIELDS[1].key] ?? ''}
+                    onChange={(v) => setField(KIT_FIELDS[1].key, v)}
+                    tone="blue"
+                    icon={Package}
+                    tag="Kit"
+                  />
+                  <MetricCard
+                    tone="green"
+                    icon={Wallet}
+                    label="Balance"
+                    value={formatPrice(kitBalance)}
+                    tag="Kit Amount − Consumido"
+                  />
+                  <MetricCard
+                    tone="orange"
+                    icon={Receipt}
+                    label="Consumido"
+                    value={formatPrice(kitConsumedTotal)}
+                  />
+                </div>
+                <KitConsumablesSection
+                  order={order}
+                  rows={kitConsumables}
+                  role={role}
+                  queryError={kitConsumablesError}
+                />
+              </div>
+            ),
+          },
+        ]
+      : []),
     {
       id: 'observacoes',
-      label: 'Observações',
+      label: 'Notes',
       content: (
         <div className="space-y-3 pt-3.5">
           <SectionCard title="OBSERVAÇÕES DO PEDIDO">
@@ -1785,24 +2674,24 @@ function OrderDetail({ order }: { order: Order }) {
               <aside className="flex flex-col gap-2.5">
                 <div className="rounded-md border border-border bg-surface-muted p-2.5">
                   <span className="mb-1.5 block text-[9px] font-extrabold text-foreground/60">
-                    ESTADO DO PEDIDO
+                    ORDER STATUS
                   </span>
                   <div className="flex min-h-[30px] items-center justify-between gap-2 border-t border-border/60 py-1.5 text-[10px] first:border-t-0">
-                    <span className="text-foreground-muted">Histórico</span>
+                    <span className="text-foreground-muted">Historical</span>
                     <Badge tone={estado === 'historico' ? 'neutral' : 'success'}>
-                      {estado === 'historico' ? 'Sim' : 'Não'}
+                      {estado === 'historico' ? 'Yes' : 'No'}
                     </Badge>
                   </div>
                   <div className="flex min-h-[30px] items-center justify-between gap-2 border-t border-border/60 py-1.5 text-[10px]">
-                    <span className="text-foreground-muted">Mês fechado</span>
+                    <span className="text-foreground-muted">Month closed</span>
                     <Badge tone={historico ? 'neutral' : 'success'}>
-                      {historico ? 'Sim' : 'Não'}
+                      {historico ? 'Yes' : 'No'}
                     </Badge>
                   </div>
                   <div className="flex min-h-[30px] items-center justify-between gap-2 border-t border-border/60 py-1.5 text-[10px]">
-                    <span className="text-foreground-muted">Negócio fechado</span>
+                    <span className="text-foreground-muted">Business closed</span>
                     <Badge tone={order.Negocio_Fechado ? 'success' : 'neutral'}>
-                      {order.Negocio_Fechado ? 'Sim' : 'Não'}
+                      {order.Negocio_Fechado ? 'Yes' : 'No'}
                     </Badge>
                   </div>
                   <div className="flex min-h-[30px] items-center justify-between gap-2 border-t border-border/60 py-1.5 text-[10px]">
@@ -1828,7 +2717,7 @@ function OrderDetail({ order }: { order: Order }) {
                     </strong>
                   </div>
                   <div className="flex min-h-[30px] items-center justify-between gap-2 border-t border-border/60 py-1.5 text-[10px]">
-                    <span className="text-foreground-muted">Pedido Cliente</span>
+                    <span className="text-foreground-muted">Customer PO</span>
                     <strong className="text-[10px] font-medium text-foreground">
                       {displayText(order.PO_Cliente)}
                     </strong>
@@ -1875,7 +2764,7 @@ function OrderDetail({ order }: { order: Order }) {
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <EstadoBadge estado={estado} />
             <PermissaoBadge role={role} />
-            {historico && <Badge tone="neutral">Mês fechado</Badge>}
+            {historico && <Badge tone="neutral">Month closed</Badge>}
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1906,13 +2795,13 @@ function OrderDetail({ order }: { order: Order }) {
           )}
           {canEnterEdit && !editing && (
             <Button size="sm" onClick={startEdit}>
-              Editar
+              Edit
             </Button>
           )}
           {editing && (
             <>
               <Button size="sm" onClick={save} disabled={mutation.isPending}>
-                Guardar
+                Save
               </Button>
               <Button
                 size="sm"
@@ -1920,7 +2809,7 @@ function OrderDetail({ order }: { order: Order }) {
                 onClick={cancelEdit}
                 disabled={mutation.isPending}
               >
-                Cancelar
+                Cancel
               </Button>
             </>
           )}
@@ -1934,7 +2823,7 @@ function OrderDetail({ order }: { order: Order }) {
         >
           {mutation.error instanceof Error
             ? mutation.error.message
-            : 'Não foi possível guardar as alterações.'}
+            : 'Could not save changes.'}
         </div>
       )}
 
@@ -1945,10 +2834,27 @@ function OrderDetail({ order }: { order: Order }) {
             <ReadOnlyRow label="ID Order">{order.ID_Order}</ReadOnlyRow>
             {CARACTERIZACAO_FIELDS.map((def) => {
               // req 4/11: warranty classification fields only apply to warranty
-              // order kinds (Tipo.Warranty = true); omit them entirely otherwise.
+              // order kinds (Type.Warranty = true); omit them entirely otherwise.
               const isWarrantyField =
                 def.key === 'ID_Tp_Warranty' || def.key === 'Warranty_DT_Inicio'
               if (isWarrantyField && order.Tipo_Warranty !== true) return null
+              // Cascade: Área/Produto/Instrumento dropdowns use the parent-filtered live
+              // lists while editing; changing a parent resets its children via the
+              // dedicated setters. Other fields use the static config options + setField.
+              const optionsOverride =
+                def.key === 'ID_Area'
+                  ? areasQuery.data
+                  : def.key === 'ID_Produto'
+                    ? produtoOptions
+                    : def.key === 'ID_Instrumento'
+                      ? instrumentoOptions
+                      : undefined
+              const onChange =
+                def.key === 'ID_Area'
+                  ? setAreaField
+                  : def.key === 'ID_Produto'
+                    ? setProdutoField
+                    : (v: string) => setField(def.key, v)
               return (
                 <CaracterizacaoRow
                   key={def.key}
@@ -1957,13 +2863,24 @@ function OrderDetail({ order }: { order: Order }) {
                   editing={editing}
                   role={role}
                   value={draft[def.key] ?? ''}
-                  onChange={(v) => setField(def.key, v)}
+                  onChange={onChange}
+                  optionsOverride={optionsOverride}
                 />
               )
             })}
+            {/* Kit flag — editable for editor/admin (not in the month-locked set).
+                Toggling it on/off here gates the Kit tab's visibility after save. */}
+            <CaracterizacaoRow
+              def={KIT_FIELDS[0]}
+              order={order}
+              editing={editing}
+              role={role}
+              value={draft[KIT_FIELDS[0].key] ?? ''}
+              onChange={(v) => setField(KIT_FIELDS[0].key, v)}
+            />
             <ReadOnlyRow label="Negócio Fechado">
               <Badge tone={order.Negocio_Fechado ? 'success' : 'neutral'}>
-                {order.Negocio_Fechado ? 'Sim' : 'Não'}
+                {order.Negocio_Fechado ? 'Yes' : 'No'}
               </Badge>
             </ReadOnlyRow>
           </SectionCard>
@@ -1971,7 +2888,7 @@ function OrderDetail({ order }: { order: Order }) {
           <SectionCard title="CONTACTOS" bodyClassName="pb-1.5">
             <ContactRow label="Email">{displayText(order.Email)}</ContactRow>
             <ContactRow label="Contacto">{displayText(order.Contacto)}</ContactRow>
-            <ContactRow label="Encomenda PHC">{displayText(order.Encomenda_Cli_PHC)}</ContactRow>
+            <ContactRow label="SAP Order">{displayText(order.Encomenda_Cli_PHC)}</ContactRow>
             <ContactRow label="Fornecedor">{displayText(order.Cod_Enc_Fornecedor)}</ContactRow>
           </SectionCard>
         </div>

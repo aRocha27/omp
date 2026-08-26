@@ -100,6 +100,13 @@ function toOrderSummary(row: SummaryRow): OrderSummary {
     Sell_Price: row.Sell_Price,
     Negocio_Fechado: row.Negocio_Fechado,
     Encomenda_Cli_PHC: row.Encomenda_Cli_PHC,
+    Kit: row.Kit,
+    ID_Tp_Warranty: row.ID_Tp_Warranty,
+    Warranty_Reserve: row.Warranty_Reserve,
+    Warranty_DT_Inicio: row.Warranty_DT_Inicio,
+    Orc_Proposta: row.Orc_Proposta,
+    PO_Cliente: row.PO_Cliente,
+    ID_Tp_Revenue: row.ID_Tp_Revenue,
   }
 }
 

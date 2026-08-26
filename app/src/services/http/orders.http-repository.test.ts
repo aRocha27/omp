@@ -33,6 +33,13 @@ const summaryRow: OrderSummary = {
   Sell_Price: 48500,
   Negocio_Fechado: false,
   Encomenda_Cli_PHC: 'PHC-1001',
+  Kit: false,
+  ID_Tp_Warranty: 1,
+  Warranty_Reserve: 1455,
+  Warranty_DT_Inicio: '2025-09-12',
+  Orc_Proposta: 'ORC-1001',
+  PO_Cliente: 'PO-1',
+  ID_Tp_Revenue: 1,
 }
 
 const detailRow: Order = {

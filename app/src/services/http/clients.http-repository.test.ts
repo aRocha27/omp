@@ -178,4 +178,98 @@ describe('HttpClientsRepository', () => {
       })
     })
   })
+
+  describe('create', () => {
+    it('POSTs to /clients with the create payload and sends the user role', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(201, { ok: true, client: detailRow }))
+
+      const input = {
+        nome: 'Client Alpha',
+        morada: 'Rua Maior 1',
+        local: 'Lisbon',
+        codpost: '1000-100',
+        no_PHC: 7701,
+        ncont: 'PT500123456',
+        ID_Tp_Cliente: 1,
+      }
+      const created = await repo.create(input, 'admin')
+
+      expect(created).toEqual(detailRow)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe('/api/clients')
+      expect(init?.method).toBe('POST')
+      expect((init?.headers as Record<string, string>)['x-user-role']).toBe('admin')
+      expect(JSON.parse(init?.body as string)).toEqual(input)
+    })
+
+    it('maps a 403 forbidden failure to a forbidden RepositoryError', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(403, { ok: false, code: 'forbidden', message: 'Only admins may create clients.' }),
+      )
+
+      await expect(
+        repo.create(
+          {
+            nome: 'n', morada: 'm', local: 'l', codpost: 'c',
+            no_PHC: 1, ncont: 'n', ID_Tp_Cliente: 1,
+          },
+          'viewer',
+        ),
+      ).rejects.toMatchObject({ kind: 'forbidden', message: 'Only admins may create clients.' })
+    })
+
+    it('maps a 400 validation failure to a server-error RepositoryError', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(400, { ok: false, code: 'validation', message: 'name is required' }),
+      )
+
+      await expect(
+        repo.create(
+          {
+            nome: '', morada: '', local: '', codpost: '',
+            no_PHC: 1, ncont: '', ID_Tp_Cliente: 1,
+          },
+          'admin',
+        ),
+      ).rejects.toMatchObject({ kind: 'server-error', message: 'name is required' })
+    })
+  })
+
+  describe('update', () => {
+    it('POSTs to /clients/update with { id, patch } and forwards the role', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, client: detailRow }))
+
+      const patch = { nome: 'Client Alpha v2', local: 'Porto' }
+      const updated = await repo.update(501, patch, 'admin')
+
+      expect(updated).toEqual(detailRow)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe('/api/clients/update')
+      expect(init?.method).toBe('POST')
+      expect((init?.headers as Record<string, string>)['x-user-role']).toBe('admin')
+      expect(JSON.parse(init?.body as string)).toEqual({ id: 501, patch })
+    })
+
+    it('maps a 404 failure to a not-found RepositoryError', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(404, { ok: false, code: 'not-found', message: 'Client 9999 was not found.' }),
+      )
+
+      await expect(repo.update(9999, { nome: 'x' }, 'admin')).rejects.toMatchObject({
+        kind: 'not-found',
+        message: 'Client 9999 was not found.',
+      })
+    })
+
+    it('maps a 403 forbidden failure to a forbidden RepositoryError', async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(403, { ok: false, code: 'forbidden', message: 'Only admins may edit clients.' }),
+      )
+
+      await expect(repo.update(501, { nome: 'x' }, 'editor')).rejects.toMatchObject({
+        kind: 'forbidden',
+        message: 'Only admins may edit clients.',
+      })
+    })
+  })
 })

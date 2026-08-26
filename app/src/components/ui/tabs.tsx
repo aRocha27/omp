@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '@/components/ui/cn'
 
 export interface TabItem {
@@ -27,8 +27,17 @@ export function Tabs({ tabs, defaultTab, ariaLabel, className }: TabsProps) {
   const [active, setActive] = useState(defaultTab ?? tabs[0]?.id ?? '')
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
-  const activeIndex = Math.max(0, tabs.findIndex((t) => t.id === active))
+  // Dynamic tab sets can remove the active tab (for example, disabling Kit while
+  // its order-detail tab is open). Resolve to the first available tab so the
+  // tablist always has one selected/tabbable control and the panel's aria label
+  // points at that selected tab.
+  const resolvedActive = tabs.some((tab) => tab.id === active) ? active : (tabs[0]?.id ?? '')
+  const activeIndex = Math.max(0, tabs.findIndex((t) => t.id === resolvedActive))
   const activeTab = tabs[activeIndex]
+
+  useEffect(() => {
+    if (resolvedActive !== active) setActive(resolvedActive)
+  }, [active, resolvedActive])
 
   function focusTab(id: string) {
     setActive(id)
@@ -58,7 +67,7 @@ export function Tabs({ tabs, defaultTab, ariaLabel, className }: TabsProps) {
         onKeyDown={onKeyDown}
       >
         {tabs.map((t) => {
-          const selected = t.id === active
+          const selected = t.id === resolvedActive
           return (
             <button
               key={t.id}

@@ -9,7 +9,7 @@ import type { DocumentoFaturacao } from '@/domain/models/documento-faturacao'
  * `DocumentoFaturacaoRepository`.
  *
  * On success the returned document replaces the matching row in the invoicing
- * list cache directly — the Faturação tab reflects the edit instantly, without
+ * list cache directly — the Invoicing tab reflects the edit instantly, without
  * a refetch flash, and the recomputed net-invoiced total (and its green
  * highlight when it equals Sell_Price) updates in the same render. The detail
  * query is invalidated in the background so the order's `Facturado` flag catches

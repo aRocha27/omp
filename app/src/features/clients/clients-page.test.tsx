@@ -86,7 +86,7 @@ describe('ClientsPage', () => {
     await screen.findByRole('table')
     expect(screen.getByText('Client Alpha')).toBeInTheDocument()
 
-    const searchInput = screen.getByPlaceholderText('Search by name, tax no., or PHC no.')
+    const searchInput = screen.getByPlaceholderText('Search by name, tax no., or SAP no.')
     fireEvent.change(searchInput, { target: { value: 'beta' } })
 
     // Beta remains, Alpha is filtered out by the fetch mock's name-contains match.
@@ -110,7 +110,7 @@ describe('ClientsPage', () => {
     renderWithProviders(<ClientsPage />, { initialPath: '/clients' })
     await screen.findByRole('table')
 
-    const searchInput = screen.getByPlaceholderText('Search by name, tax no., or PHC no.')
+    const searchInput = screen.getByPlaceholderText('Search by name, tax no., or SAP no.')
     fireEvent.change(searchInput, { target: { value: 'zzz' } })
 
     expect(await screen.findByText('No clients match these filters')).toBeInTheDocument()

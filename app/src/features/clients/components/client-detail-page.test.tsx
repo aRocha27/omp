@@ -4,7 +4,9 @@
  * Global `fetch` is stubbed — no network. Mirrors `order-detail-page.test.tsx`:
  * covers the found-detail render (heading + classification/contact/address
  * fields), the not-found state for a missing id, the not-found state for an
- * invalid non-numeric id, and the loading state.
+ * invalid non-numeric id, and the loading state. Also covers the ADMIN-only
+ * inline-edit toggle: the button is hidden for editor/viewer, opens the form
+ * when clicked by an admin, and pre-fills the form from the loaded client.
  */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { screen } from '@testing-library/react'
@@ -85,7 +87,7 @@ describe('ClientDetailPage', () => {
     // Classification section — Type resolves via tpClienteLabel (id 1 → Academia & Non-Profit).
     expect(screen.getByText('Type')).toBeInTheDocument()
     expect(screen.getByText('Academia & Non-Profit')).toBeInTheDocument()
-    expect(screen.getByText('PHC no.')).toBeInTheDocument()
+    expect(screen.getByText('SAP no.')).toBeInTheDocument()
     expect(screen.getByText('7701')).toBeInTheDocument()
     expect(screen.getByText('Tax no.')).toBeInTheDocument()
     expect(screen.getByText('PT500123456')).toBeInTheDocument()
@@ -147,5 +149,129 @@ describe('ClientDetailPage', () => {
     })
 
     expect(screen.getByText('Loading client…')).toBeInTheDocument()
+  })
+
+  it('hides the Edit button for non-admin users (editor role)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, client: detailRow }))
+
+    renderWithProviders(<ClientDetailPage />, {
+      initialRole: 'editor',
+      initialPath: '/clients/501',
+      routePath: '/clients/:id',
+    })
+
+    expect(await screen.findByRole('heading', { name: /Client Alpha/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument()
+  })
+
+  it('hides the Edit button for non-admin users (viewer role)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, client: detailRow }))
+
+    renderWithProviders(<ClientDetailPage />, {
+      initialRole: 'viewer',
+      initialPath: '/clients/501',
+      routePath: '/clients/:id',
+    })
+
+    expect(await screen.findByRole('heading', { name: /Client Alpha/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the Edit button for admins and opens a pre-filled form on click', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, client: detailRow }))
+
+    const { user } = renderWithProviders(<ClientDetailPage />, {
+      initialRole: 'admin',
+      initialPath: '/clients/501',
+      routePath: '/clients/:id',
+    })
+
+    const editButton = await screen.findByRole('button', { name: /edit/i })
+    await user.click(editButton)
+
+    // Edit mode swaps the read view for the form. The read-only "Type" label
+    // would have matched via the heading; the form label is `Type *`.
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Client Alpha')
+    expect(screen.getByRole('textbox', { name: 'Address' })).toHaveValue('Rua Maior 1')
+    expect(screen.getByRole('textbox', { name: 'Location' })).toHaveValue('Lisbon')
+    expect(screen.getByRole('textbox', { name: 'Postal Code' })).toHaveValue('1000-100')
+    expect(screen.getByRole('spinbutton', { name: 'SAP number' })).toHaveValue(7701)
+    expect(screen.getByRole('textbox', { name: 'Tax Number' })).toHaveValue('PT500123456')
+    expect(screen.getByRole('combobox', { name: 'Type' })).toHaveValue('1')
+    expect(screen.getByRole('textbox', { name: 'Phone' })).toHaveValue('+351210000000')
+    expect(screen.getByRole('textbox', { name: 'Fax' })).toHaveValue('+351210000001')
+    expect(screen.getByRole('textbox', { name: 'Contact name' })).toHaveValue('Jane Doe')
+    expect(screen.getByRole('textbox', { name: 'Zone' })).toHaveValue('Sul')
+
+    // Save/Cancel are exposed while in edit mode.
+    expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument()
+  })
+
+  it('cancel returns to the read view without issuing an update request', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, client: detailRow }))
+
+    const { user } = renderWithProviders(<ClientDetailPage />, {
+      initialRole: 'admin',
+      initialPath: '/clients/501',
+      routePath: '/clients/:id',
+    })
+
+    await user.click(await screen.findByRole('button', { name: /edit/i }))
+    await user.click(screen.getByRole('button', { name: /cancel/i }))
+
+    // Read view returns, form is gone, Edit button returns for re-entry.
+    expect(screen.getByText('Street address')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1) // only the GET, no PATCH
+  })
+
+  it('save issues the patch and returns to the read view on success', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true, client: detailRow }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, { ok: true, client: { ...detailRow, nome: 'Client Alpha v2' } }),
+      )
+
+    const { user } = renderWithProviders(<ClientDetailPage />, {
+      initialRole: 'admin',
+      initialPath: '/clients/501',
+      routePath: '/clients/:id',
+    })
+
+    await user.click(await screen.findByRole('button', { name: /edit/i }))
+    const nameInput = screen.getByRole('textbox', { name: 'Name' })
+    await user.clear(nameInput)
+    await user.type(nameInput, 'Client Alpha v2')
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    // Returned to read view (Edit button is back).
+    expect(await screen.findByRole('button', { name: /edit/i })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [, updateInit] = fetchMock.mock.calls[1]
+    expect(updateInit?.method).toBe('POST')
+    expect((updateInit?.headers as Record<string, string>)['x-user-role']).toBe('admin')
+    expect(JSON.parse(updateInit?.body as string)).toEqual({
+      id: 501,
+      patch: { nome: 'Client Alpha v2' },
+    })
+  })
+
+  it('skips the update call when nothing changed and just exits edit mode', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true, client: detailRow }))
+
+    const { user } = renderWithProviders(<ClientDetailPage />, {
+      initialRole: 'admin',
+      initialPath: '/clients/501',
+      routePath: '/clients/:id',
+    })
+
+    await user.click(await screen.findByRole('button', { name: /edit/i }))
+    await user.click(screen.getByRole('button', { name: /save changes/i }))
+
+    // No patch was needed — the form short-circuits and the read view returns.
+    expect(await screen.findByRole('button', { name: /edit/i })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

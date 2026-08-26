@@ -2,8 +2,8 @@
  * Order edit policy — the "bloqueio de caracterização após fecho do mês" rule.
  *
  * A characterization field is locked for an Editor when the order sits in a past
- * month (year+month comparison, NOT month-only) AND the order is not Provisória.
- * Admins override; Viewers are read-only everywhere; Provisória orders stay fully
+ * month (year+month comparison, NOT month-only) AND the order is not Provisional.
+ * Admins override; Viewers are read-only everywhere; Provisional orders stay fully
  * editable regardless of the month.
  *
  * Pure and deterministic: takes the order and the role, returns booleans. The UI
@@ -13,11 +13,11 @@
 import type { Order } from '@/domain/models/order'
 import type { RoleLike } from '@/domain/models/user'
 
-export type OrderEstado = 'provisorio' | 'historico' | 'atual'
+export type OrderEstado = 'provisorio' | 'historico' | 'current'
 
 /**
  * Caracterização fields an Editor cannot touch once the order's month has closed.
- * The DT_Order is included so an Editor cannot move a histórico order into the
+ * The DT_Order is included so an Editor cannot move a historical order into the
  * current month to escape the lock.
  */
 export const LOCKED_CARACTERIZACAO: ReadonlySet<keyof Order> = new Set<keyof Order>([
@@ -41,8 +41,8 @@ export function startOfCurrentMonthUTC(today: Date = new Date()): Date {
 
 /**
  * True when the order date falls before the first day of the current month AND the
- * order is not Provisória. Year+month comparison (Dez/2025 vs Jan/2026 = past),
- * never month-only. A null/invalid date is treated as not-histórico (safe default:
+ * order is not Provisional. Year+month comparison (Dec/2025 vs Jan/2026 = past),
+ * never month-only. A null/invalid date is treated as not-historical (safe default:
  * editable) so a bad row never bricks the detail page.
  */
 export function isHistorico(order: Pick<Order, 'DT_Order' | 'Provisoria'>, today: Date = new Date()): boolean {
@@ -52,15 +52,59 @@ export function isHistorico(order: Pick<Order, 'DT_Order' | 'Provisoria'>, today
   return orderDate < startOfCurrentMonthUTC(today)
 }
 
-/** Classify an order for display: Provisória first, then histórico, otherwise atual. */
+/** Classify an order for display: Provisional first, then historical, otherwise current. */
 export function orderEstado(order: Pick<Order, 'DT_Order' | 'Provisoria'>, today: Date = new Date()): OrderEstado {
   if (order.Provisoria === true) return 'provisorio'
-  return isHistorico(order, today) ? 'historico' : 'atual'
+  return isHistorico(order, today) ? 'historico' : 'current'
 }
 
-/** True for the caracterização fields locked for an Editor in a histórico order. */
+/** True for the caracterização fields locked for an Editor in a historical order. */
 export function isLockedCaracterizacaoField(field: keyof Order): boolean {
   return LOCKED_CARACTERIZACAO.has(field)
+}
+
+/**
+ * Whether the financial sub-tables (recognitions + invoicing documents) accept
+ * new rows from `role` on this order.
+ *
+ * - viewer → never (read-only everywhere)
+ * - editor / user / admin → always
+ *
+ * The user explicitly asked that "the USER may Add recognition and Invoice"
+ * even after the month has closed; the month lock only applies to
+ * editing/deleting existing rows (see {@link canEditFinancial}). Provisional
+ * orders are always editable, so the helper short-circuits to `true` there
+ * for symmetry with the other policy checks.
+ */
+export function canAddFinancial(role: RoleLike): boolean {
+  if (role === 'viewer') return false
+  return true
+}
+
+/**
+ * Whether an existing financial row (recognition or invoicing document) may be
+ * edited or deleted by `role` on this order.
+ *
+ * - viewer → never (read-only everywhere)
+ * - admin  → always (admin override)
+ * - editor / user → allowed while the order's month is current or future
+ *   (`isHistorico` is false). Once the month has closed the row becomes
+ *   admin-only — the rule the user asked for: "the USER can only change the
+ *   Recognition or Invoice if its inside the month, after a month has passed
+ *   its locked of chaning and only the ADMIN may change that data". Adding new
+ *   rows is intentionally NOT gated here — see {@link canAddFinancial}.
+ *
+ * Provisional orders stay fully editable regardless of the month (consistent
+ * with the existing caracterização lock).
+ */
+export function canEditFinancial(
+  order: Pick<Order, 'DT_Order' | 'Provisoria'>,
+  role: RoleLike,
+  today: Date = new Date(),
+): boolean {
+  if (role === 'viewer') return false
+  if (role === 'admin') return true
+  return !isHistorico(order, today)
 }
 
 /**
@@ -68,7 +112,7 @@ export function isLockedCaracterizacaoField(field: keyof Order): boolean {
  *
  * - viewer → never (read-only everywhere)
  * - admin  → always
- * - editor → blocked only on caracterização fields of a histórico order
+ * - editor → blocked only on caracterização fields of a historical order
  */
 export function canEditField(
   order: Pick<Order, 'DT_Order' | 'Provisoria'>,

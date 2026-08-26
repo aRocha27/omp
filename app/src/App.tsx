@@ -3,6 +3,7 @@ import { QueryProvider } from '@/app/providers/query-provider'
 import { UserProvider } from '@/app/providers/user-provider'
 import { RepositoryProvider } from '@/app/providers/repository-provider'
 import { router } from '@/app/router'
+import { IntroSplash } from '@/components/layout/intro-splash'
 
 export function App() {
   return (
@@ -10,6 +11,7 @@ export function App() {
       <UserProvider>
         <RepositoryProvider>
           <RouterProvider router={router} />
+          <IntroSplash />
         </RepositoryProvider>
       </UserProvider>
     </QueryProvider>
