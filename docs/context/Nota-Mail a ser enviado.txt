@@ -1,0 +1,34 @@
+
+Subject:
+[<Sender Company>] Envio de <DocType> <Nº Documento> – Encomenda <PO Number> - <Cliente>
+
+Body:
+Caro(a) <Customer Contact>,
+
+A <Sender Company> envia, por este meio, o nosso documento nº <Nº Documento>, referente à vossa Nota de Encomenda nº <PO Number>, no valor total de <Amount>.
+
+Detalhes do documento
+
+Empresa: <Cliente>
+Data do documento: <DateDoc>
+
+Tipo de documento: <DocType>
+Nº do documento: <Nº Documento>
+Nota de Encomenda: <PO Number>
+Valor sem IVA: <AmountwoVAT>
+Valor do IVA: <VATAmount>
+Valor total:  <Amount>
+
+Agradecemos a vossa atenção e ficamos disponíveis para qualquer esclarecimento adicional.
+
+Com os melhores cumprimentos,
+
+<Sender Contact>
+<Sender Role>
+
+<Sender Company>
+p: <Sender Phone>
+w: <Sender Website>
+e: <Sender Email>
+
+a: <Sender Address>

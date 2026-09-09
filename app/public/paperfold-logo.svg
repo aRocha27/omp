@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80" role="img" aria-label="Paperfold">
+  <title>Paperfold</title>
+  <rect x="0" y="0" width="320" height="80" fill="#ffffff"/>
+  <g fill="#0f172a" font-family="Helvetica, Arial, sans-serif" font-weight="700">
+    <text x="20" y="52" font-size="40">Paperfold</text>
+    <text x="210" y="52" font-size="14" font-weight="400" fill="#64748b">Stationery</text>
+  </g>
+</svg>

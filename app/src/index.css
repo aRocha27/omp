@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens — single source of truth for the UI.
+ * Values are intentionally neutral; refine via an ADR when a brand palette is decided.
+ * See docs/design/UI_UX_GUIDELINES.md §12 (design-system components).
+ */
+@theme {
+  --color-background: #f4f8fb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f4f8fb;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+
+  --color-foreground: #0f172a;
+  --color-foreground-muted: #475569;
+  --color-foreground-subtle: #94a3b8;
+
+  --color-primary: #082844;
+  --color-primary-foreground: #ffffff;
+  --color-primary-muted: #d9eef9;
+
+  --color-success: #15803d;
+  --color-warning: #b45309;
+  --color-danger: #b91c1c;
+  --color-danger-muted: #fee2e2;
+
+  --color-violet: #9333ea;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root {
+  color-scheme: light;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --color-background: #071624;
+  --color-surface: #0d2235;
+  --color-surface-muted: #081a2a;
+  --color-border: #29445b;
+  --color-border-strong: #3a5870;
+  --color-foreground: #f8fafc;
+  --color-foreground-muted: #c3d2df;
+  --color-foreground-subtle: #8fa7ba;
+  --color-primary: #8ec9ed;
+  --color-primary-foreground: #071624;
+  --color-primary-muted: #1c4f70;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-foreground);
+  background-color: var(--color-surface-muted);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.welcome-overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: rgb(8 40 68 / 18%); backdrop-filter: blur(2px); animation: welcome-fade 2.2s ease both; pointer-events: none; }
+.welcome-card { border: 1px solid rgb(255 255 255 / 50%); border-radius: 1rem; background: rgb(255 255 255 / 94%); padding: 2rem 3rem; text-align: center; box-shadow: 0 18px 50px rgb(8 40 68 / 22%); animation: welcome-scale 2.2s ease both; }
+.welcome-card p { margin: 0; color: #082844; font-size: 1.25rem; }
+.welcome-card strong { display: block; margin-top: .35rem; color: #15803d; font-size: 1.5rem; }
+@keyframes welcome-fade { 0%, 78% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes welcome-scale { 0% { transform: scale(.96) translateY(5px) } 15%, 78% { transform: scale(1) translateY(0) } 100% { transform: scale(.98) translateY(-4px) } }
+@media (prefers-reduced-motion: reduce) { .welcome-overlay, .welcome-card { animation: none } .welcome-overlay { transition: opacity .2s ease } }

@@ -1,0 +1,3 @@
+import { useEffect, useState } from 'react'
+import { useAuth } from '@/app/providers/user-provider'
+export function WelcomeOverlay() { const { user } = useAuth(); const [visible, setVisible] = useState(() => { try { return sessionStorage.getItem('orders-welcome-shown') !== '1' } catch { return true } }); useEffect(() => { if (!user) return; try { sessionStorage.setItem('orders-welcome-shown', '1') } catch { return } const timer = window.setTimeout(() => setVisible(false), 2200); return () => window.clearTimeout(timer) }, [user]); if (!user || !visible) return null; return <div className="welcome-overlay" aria-live="polite"><div className="welcome-card"><p>Hello, {user.User_Name}</p><strong>Welcome Back !</strong></div></div> }

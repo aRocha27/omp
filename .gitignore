@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+dist/
+dist-ssr/
+build/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+.cache/
+
+# Environment & secrets — never commit
+.env
+.env.*
+!.env.example
+*.local
+.spartan/ai.env
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# MCP config — machine-specific absolute paths, keep local
+.mcp.json
+
+# Misc
+*.tmp
+
+# Local Docker exports
+docker/exports/
+
+# Local order exports
+app/order-*.xlsx
+
+# Private deployment notes / Windows mail service (kept local only)
+note_docker.txt
+service/
+service.zip
+service-corrigido.zip
+
+# Internal interview study materials and stray scratch assets
+docs/omp-interview-study-guide.drawio
+302034548be89dff4b504356c433f7ba.jpg
+
+# Machine-specific editor / agent config
+opencode.json

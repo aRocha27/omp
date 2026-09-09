@@ -1,0 +1,227 @@
+/**
+ * Order domain models.
+ *
+ * Field names preserve the original Access/database identifiers verbatim
+ * (AGENT.md §10, report.md §13) to keep traceability with the legacy system.
+ * SQL types and nullability verified against the demo schema:
+ * - ID_Area / ID_Tipo are string codes ("BDAL", "INSTR"), not numbers.
+ * - ID_Tp_Warranty / ID_Tp_Revenue are numbers (1, 2, 3), not strings.
+ * - Client name comes from V_Order_List `nome` (aliased Client_Name); Client contact
+ *   Email and Contacto come from the order row itself. The detail endpoint projects these
+ *   order-level contact fields directly.
+ * - `upsize_ts` is a rowversion Buffer — opaque, never serialized; the HTTP layer strips it.
+ */
+export type OrderTypeId = string
+
+export type OrderSortId =
+  | 'ID_Order'
+  | 'Encomenda_Cli_PHC'
+  | 'Negocio_Fechado'
+  | 'DT_Order'
+  | 'Order_Factory'
+  | 'Kit'
+  | 'ID_Tp_Order'
+  | 'Client_Name'
+  | 'ID_Area'
+  | 'ID_Tipo'
+  | 'ID_Produto'
+  | 'ID_Instrumento'
+  | 'Sell_Price'
+  | 'ID_Tp_Warranty'
+  | 'Warranty_Reserve'
+  | 'Warranty_DT_Inicio'
+  | 'Orc_Proposta'
+  | 'PO_Cliente'
+  | 'ID_Tp_Revenue'
+
+/**
+ * Confirmed Order fields from the Access relationships PDF, reconciled to the live
+ * dbo.[Order] table. `upsize_ts` is an Access upsizing timestamp column — opaque here,
+ * not a business field; the backend omits it from the JSON payload.
+ */
+export interface Order {
+  ID_Order: number
+  /** Order date. Stored as ISO string in the app layer; the DB column is NOT NULL. */
+  DT_Order: string
+  Order_Factory: boolean | null
+  ID_Tp_Order: OrderTypeId | null
+  /**
+   * Provisional flag. The base dbo.[Order] table has no such column; this is the
+   * `Provisoria` bit exposed by dbo.V_Order_List (true for every non-Client order
+   * type — S/W/COM/CANC/WPO/...). A provisional order is always editable, regardless
+   * of the month-close lock (see domain/orders/order-policy).
+   */
+  Provisoria: boolean | null
+  Encomenda_Cli_PHC: string | null
+  ID_Client: number | null
+  /**
+   * Client display name. The live detail endpoint joins the Client table and returns
+   * this directly; the mock leaves it unset and the detail page falls back to
+   * `resolveClientName(ID_Client)`.
+   */
+  Client_Name?: string | null
+  /** Business area — string code (verified 2026-08-23). */
+  ID_Area: string | null
+  /** Order kind — string code (verified 2026-08-23). */
+  ID_Tipo: string | null
+  ID_Produto: number | null
+  ID_Instrumento: number | null
+  /**
+   * Whether this order's kind (`ID_Tipo`) carries a warranty, resolved from
+   * `dbo.Tipo.Warranty` (bit) via `Order.ID_Tipo = Tipo.ID_Tipo`. `true` for
+   * INSTR/ACESS/WARR, `false` for CM/CONS/SERVI/SPARE/TR/SOFT; `null` when the
+   * join found no `Tipo` row (or the live read has not resolved it). Drives the
+   * visibility of the warranty caracterização fields and the propagate-warranty
+   * button (see domain/rules/recognition).
+   */
+  Tipo_Warranty: boolean | null
+  /** Budget/proposal reference (nvarchar in the DB, not a money amount). */
+  Orc_Proposta: string | null
+  PO_Cliente: string | null
+  Sell_Price: number | null
+  /** Warranty type — numeric code (verified 2026-08-23). */
+  ID_Tp_Warranty: number | null
+  Warranty_Reserve: number | null
+  Warranty_DT_Inicio: string | null
+  /** Revenue type — numeric code (verified 2026-08-23). */
+  ID_Tp_Revenue: number | null
+  Facturado: boolean | null
+  Reconhecido: boolean | null
+  Cod_Enc_Fornecedor: string | null
+  Obs: string | null
+  Negocio_Fechado: boolean | null
+  ID_User: string | null
+  DT_User: string | null
+  upsize_ts: unknown
+  Kit: boolean | null
+  Kit_Amount: number | null
+  /** Order contact — from dbo.[Order].Contacto. */
+  Contacto: string | null
+  /** Order email — from dbo.[Order].Email. */
+  Email: string | null
+  Audit?: string | null
+  /** Canonical labels returned by the live order query; absent in mock-only rows. */
+  Tp_Order_Label?: string | null
+  Area_Label?: string | null
+  Tipo_Label?: string | null
+  Produto_Label?: string | null
+  Instrumento_Label?: string | null
+  Tp_Warranty_Label?: string | null
+  Tp_Revenue_Label?: string | null
+}
+
+/**
+ * Order list row. Backed by dbo.V_Order_List, which already joins the client name
+ * (`nome` aliased Client_Name). Columns verified against the demo schema.
+ */
+export interface OrderSummary {
+  ID_Order: number
+  DT_Order: string
+  Order_Factory: boolean | null
+  ID_Tp_Order: OrderTypeId | null
+  /** Provisional flag from V_Order_List (see Order.Provisoria). */
+  Provisoria: boolean | null
+  ID_Client: number | null
+  /** Display name from V_Order_List `nome` projection. */
+  Client_Name: string | null
+  /** Business area — string code (verified 2026-08-23). */
+  ID_Area: string | null
+  /** Order kind — string code (verified 2026-08-23). */
+  ID_Tipo: string | null
+  ID_Produto: number | null
+  ID_Instrumento: number | null
+  Sell_Price: number | null
+  Negocio_Fechado: boolean | null
+  Encomenda_Cli_PHC: string | null
+  /**
+   * Order-table-only columns joined from dbo.[Order] so the list grid can render the
+   * full 19-column table without a per-row detail fetch. Types mirror `Order`.
+   */
+  Kit: boolean | null
+  ID_Tp_Warranty: number | null
+  Warranty_Reserve: number | null
+  Warranty_DT_Inicio: string | null
+  Orc_Proposta: string | null
+  PO_Cliente: string | null
+  ID_Tp_Revenue: number | null
+  /** Labels resolved by the live Orders list query, independent of filter options. */
+  Tp_Order_Label?: string | null
+  Area_Label?: string | null
+  Tipo_Label?: string | null
+  Produto_Label?: string | null
+  Instrumento_Label?: string | null
+  Tp_Warranty_Label?: string | null
+  Tp_Revenue_Label?: string | null
+}
+
+/**
+ * Confirmed order-list filters (AGENT.md §9).
+ * All optional; absent/empty fields are not filtered.
+ *
+ * Categorical filters (order type, area, tipo, product, instrument) are
+ * multi-select arrays — a row matches if its value is in the set (SQL `IN`).
+ * Empty array / null = no filter. Boolean filters (`orderFactory`,
+ * `negocioFechado`) are "only show…" toggles: `true` filters to that flag,
+ * `false`/null = no filter (the UI can no longer filter to the false branch).
+ */
+export interface OrderSearchFilters {
+  /** Order date from (inclusive), ISO date. */
+  dateFrom?: string | null
+  /** Order date to (inclusive), ISO date. */
+  dateTo?: string | null
+  /** Client name — contains match. */
+  clientName?: string | null
+  /** Factory-order flag — `true` keeps only factory orders. */
+  orderFactory?: boolean | null
+  /** Order type codes — row matches if `ID_Tp_Order` ∈ set. */
+  idTpOrder?: OrderTypeId[] | null
+  /** Business area codes — row matches if `ID_Area` ∈ set. */
+  idArea?: string[] | null
+  /** Order kind codes — row matches if `ID_Tipo` ∈ set. */
+  idTipo?: string[] | null
+  /** Product ids — row matches if `ID_Produto` ∈ set. */
+  idProduto?: number[] | null
+  /** Instrument ids — row matches if `ID_Instrumento` ∈ set. */
+  idInstrumento?: number[] | null
+  /** PHC order number — match on `Encomenda_Cli_PHC`. */
+  encomendaCliPHC?: string | null
+  /** Invoice number — contains match against Facturacao.N_Doc_FT by ID_Order. */
+  invoiceNumber?: string | null
+  /** Closed-deal flag (`Negocio_Fechado`) — `true` keeps only closed deals. */
+  negocioFechado?: boolean | null
+}
+
+export interface OrderFacetOption {
+  id: string | number
+  label: string | null
+}
+
+export interface OrderFacets {
+  idTpOrder: OrderFacetOption[]
+  idArea: OrderFacetOption[]
+  idTipo: OrderFacetOption[]
+  idProduto: OrderFacetOption[]
+  idInstrumento: OrderFacetOption[]
+}
+
+/** Normalised filters with inactive values stripped (used by repositories). */
+export type NormalisedOrderSearchFilters = {
+  [K in keyof OrderSearchFilters]: NonNullable<OrderSearchFilters[K]>
+}
+
+/** Strip inactive filter values so repositories only act on set filters:
+ * null/undefined/'' (strings), empty arrays (categoricals), and `false`
+ * (the boolean "only show…" toggles — `false` means "no filter"). */
+export function normaliseOrderFilters(
+  filters: OrderSearchFilters,
+): Partial<NormalisedOrderSearchFilters> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === null || value === undefined) continue
+    if (value === '') continue
+    if (Array.isArray(value) && value.length === 0) continue
+    if (value === false) continue
+    result[key] = value
+  }
+  return result as Partial<NormalisedOrderSearchFilters>
+}

@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    image: omp-backend:local
+    restart: unless-stopped
+    env_file:
+      - ../server/.env
+    volumes:
+      - ../server/.env:/app/.env
+    expose:
+      - "4000"
+    networks:
+      - orders
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    image: omp-frontend:local
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    networks:
+      - orders
+
+networks:
+  orders:
+    driver: bridge

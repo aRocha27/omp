@@ -1,0 +1,15 @@
+.git
+.github
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+server
+docker/exports
+*.zip
+*.tar
+*.tar.gz
+docs
+legacy/**/preview.html
+legacy/**/production-report.template.html
+*.log

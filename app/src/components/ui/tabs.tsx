@@ -1,0 +1,116 @@
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { cn } from '@/components/ui/cn'
+
+export interface TabItem {
+  id: string
+  label: string
+  content: ReactNode
+}
+
+interface TabsProps {
+  tabs: TabItem[]
+  /** Initially active tab id; defaults to the first tab. */
+  defaultTab?: string
+  /** Accessible label for the tablist. */
+  ariaLabel?: string
+  className?: string
+  onChange?: (activeTab: string) => void
+}
+
+/**
+ * Accessible tabs (WAI-ARIA tablist pattern).
+ *
+ * - Roving tabindex: only the active tab is in the tab order.
+ * - Arrow Left/Right move between tabs (wrapping); Home/End jump to ends.
+ * - The active panel is rendered alone and labelled by its tab.
+ */
+export function Tabs({ tabs, defaultTab, ariaLabel, className, onChange }: TabsProps) {
+  const [active, setActive] = useState(defaultTab ?? tabs[0]?.id ?? '')
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+
+  // Dynamic tab sets can remove the active tab (for example, disabling Kit while
+  // its order-detail tab is open). Resolve to the first available tab so the
+  // tablist always has one selected/tabbable control and the panel's aria label
+  // points at that selected tab.
+  const resolvedActive = tabs.some((tab) => tab.id === active) ? active : (tabs[0]?.id ?? '')
+  const activeIndex = Math.max(0, tabs.findIndex((t) => t.id === resolvedActive))
+  const activeTab = tabs[activeIndex]
+
+  useEffect(() => {
+    // Resolve an active tab removed by a dynamic tab set.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (resolvedActive !== active) setActive(resolvedActive)
+  }, [active, resolvedActive])
+
+  function focusTab(id: string) {
+    setActive(id)
+    onChange?.(id)
+    tabRefs.current[id]?.focus()
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const count = tabs.length
+    if (count === 0) return
+    let nextIndex: number | null = null
+    if (e.key === 'ArrowRight') nextIndex = (activeIndex + 1) % count
+    else if (e.key === 'ArrowLeft') nextIndex = (activeIndex - 1 + count) % count
+    else if (e.key === 'Home') nextIndex = 0
+    else if (e.key === 'End') nextIndex = count - 1
+    if (nextIndex !== null) {
+      e.preventDefault()
+      focusTab(tabs[nextIndex].id)
+    }
+  }
+
+  return (
+    <div className={className}>
+      <div
+        role="tablist"
+        aria-label={ariaLabel}
+        className="flex flex-wrap gap-1 border-b border-border"
+        onKeyDown={onKeyDown}
+      >
+        {tabs.map((t) => {
+          const selected = t.id === resolvedActive
+          return (
+            <button
+              key={t.id}
+              ref={(el) => {
+                tabRefs.current[t.id] = el
+              }}
+              role="tab"
+              id={`tab-${t.id}`}
+              aria-selected={selected}
+              // Only the active tab points at a panel — non-active panels are not
+              // rendered, so an unconditional aria-controls would reference ids
+              // that don't exist in the DOM (WAI-ARIA: control target must exist).
+              aria-controls={selected ? `panel-${t.id}` : undefined}
+              tabIndex={selected ? 0 : -1}
+               onClick={() => {
+                 setActive(t.id)
+                 onChange?.(t.id)
+               }}
+              className={cn(
+                '-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors',
+                selected
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-foreground/60 hover:text-foreground',
+              )}
+            >
+              {t.label}
+            </button>
+          )
+        })}
+      </div>
+      <div
+        role="tabpanel"
+        id={`panel-${activeTab?.id}`}
+        aria-labelledby={`tab-${activeTab?.id}`}
+        tabIndex={0}
+        className="pt-4 focus-visible:outline-none"
+      >
+        {activeTab?.content}
+      </div>
+    </div>
+  )
+}
